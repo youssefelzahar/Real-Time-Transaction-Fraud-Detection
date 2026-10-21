@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data & models
+data/*
+!data/README.md
+models/*
+!models/.gitkeep
+
+# Testing
+.pytest_cache/
+.coverage
