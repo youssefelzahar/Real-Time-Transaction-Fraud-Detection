@@ -17,7 +17,7 @@ from typing import Annotated, Literal, Optional, Protocol
 from fastapi import Body, FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from src.predict import FraudPredictor
+from src.predict import TIMING_LOG, FraudPredictor
 from time import perf_counter
 
 class AccountService(Protocol):
@@ -137,8 +137,10 @@ def health(request: Request):
 
 
 
+# async: scoring is sub-millisecond CPU work, so running it on the event loop is
+# cheaper than FastAPI's per-request hop to a thread pool for sync endpoints.
 @app.post("/predict", response_model=ScoreResponse)
-def predict(
+async def predict(
     tx: Annotated[TransactionRequest, Body(openapi_examples=EXAMPLES)],
     request: Request,
 ):
@@ -178,11 +180,12 @@ def predict(
 
     total_ms = (perf_counter() - start) * 1000
 
-    print({
-        "balance_ms": round(balance_ms, 3),
-        "model_ms": round(model_ms, 3),
-        "total_ms": round(total_ms, 3),
-    })
+    if TIMING_LOG:
+        print({
+            "balance_ms": round(balance_ms, 3),
+            "model_ms": round(model_ms, 3),
+            "total_ms": round(total_ms, 3),
+        })
 
     return ScoreResponse(
         transaction_id=tx.transaction_id,

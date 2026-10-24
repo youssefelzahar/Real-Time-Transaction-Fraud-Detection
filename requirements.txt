@@ -4,7 +4,7 @@ scikit-learn
 seaborn
 matplotlib
 fastapi
-uvicorn
+uvicorn[standard]  # uvloop + httptools; plain asyncio loses TCP_NODELAY with --workers > 1 (+40 ms per request)
 xgboost
 pytest
 httpx

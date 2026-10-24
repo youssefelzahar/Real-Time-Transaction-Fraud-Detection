@@ -23,6 +23,13 @@ def test_health(client):
     assert client.get("/health").json() == {"status": "ok", "model_version": "e6_test"}
 
 
+def test_response_schema_is_stable(client):
+    """Deployment changes (proxy, instances) must not add or remove public fields."""
+    body = client.post("/predict", json=payload()).json()
+    assert set(body) == {"transaction_id", "fraud_probability", "decision", "threshold",
+                         "model_version", "missing_features", "balance_source"}
+
+
 def test_predict_uses_balances_from_account_service(client):
     r = client.post("/predict", json=payload())
     assert r.status_code == 200

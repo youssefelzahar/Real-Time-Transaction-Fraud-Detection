@@ -82,6 +82,31 @@ def _flag(condition, *inputs):
     return np.where(missing, np.nan, np.asarray(condition, dtype="float64"))
 
 
+NAN = float("nan")
+
+
+def _to_float(value):
+    """Scalar version of pd.to_numeric(errors='coerce'): None / unparsable -> NaN."""
+    if value is None:
+        return NAN
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return NAN
+
+
+def _to_type(value):
+    """Scalar version of .astype('string'): None / NaN -> None."""
+    if value is None or (isinstance(value, float) and value != value):
+        return None
+    return str(value)
+
+
+def _ratio(num, den):
+    """Scalar safe_ratio."""
+    return num / den if den > 0 and num == num else NAN
+
+
 class FeaturePipeline:
     """Builds model features from raw transaction fields.
 
@@ -148,6 +173,36 @@ class FeaturePipeline:
                 X[f"type_{t}"] = (types == t).fillna(False).astype("float64")  # unseen type -> all zeros
 
         return X[self.feature_names].astype("float64")
+
+    def transform_one(self, record):
+        """Same features as transform() for a single dict, without building a DataFrame.
+        Used on the API hot path; tests check it matches transform() exactly."""
+        if self.type_medians is None:
+            raise RuntimeError("FeaturePipeline must be fitted before transform")
+        amount = _to_float(record.get("amount"))
+        orig = _to_float(record.get("oldbalanceOrg"))
+        dest = _to_float(record.get("oldbalanceDest"))
+        t = _to_type(record.get("type"))
+        type_median = self.type_medians.get(t, NAN) if t is not None else NAN
+
+        f = {
+            "amount": amount,
+            "oldbalanceOrg": orig,
+            "oldbalanceDest": dest,
+            "amt_to_orig_bal": _ratio(amount, orig),
+            "exceeds_orig_bal": NAN if amount != amount or orig != orig else float(amount > orig),
+            "orig_bal_zero": NAN if orig != orig else float(orig == 0),
+            "dest_bal_zero": NAN if dest != dest else float(dest == 0),
+            "amt_to_dest_bal": _ratio(amount, dest),
+            "is_max_amount": NAN if amount != amount else float(amount >= self.max_amount),
+            "amt_vs_type_median": _ratio(amount, type_median),
+            "type_code": float(self.type_codes[t]) if t in self.type_codes else NAN,
+        }
+        if self.feature_set == "E5":
+            f["hour"] = _to_float(record.get("step")) % 24
+            for known in self.known_types:
+                f[f"type_{known}"] = float(t == known)
+        return np.array([f[name] for name in self.feature_names], dtype="float64")
 
     def to_dict(self):
         return {"feature_set": self.feature_set, "max_amount": self.max_amount,

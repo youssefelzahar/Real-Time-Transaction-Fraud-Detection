@@ -17,3 +17,6 @@ models/*
 # Testing
 .pytest_cache/
 .coverage
+
+# Local deployment runtime (pids, logs, nginx temp)
+deploy/run/

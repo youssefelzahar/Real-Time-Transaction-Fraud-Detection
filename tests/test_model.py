@@ -155,6 +155,36 @@ def test_training_serving_consistency(model_dir, transactions):
     np.testing.assert_allclose(serving, proba_batch, rtol=1e-6)
 
 
+EDGE_RECORDS = [
+    {"type": "TRANSFER", "amount": 0.0, "oldbalanceOrg": 0.0, "oldbalanceDest": 0.0, "step": 1},
+    {"type": "TRANSFER", "amount": 5000.0, "oldbalanceOrg": None, "oldbalanceDest": None, "step": None},
+    {"type": "CRYPTO", "amount": 5000.0, "oldbalanceOrg": 100.0, "oldbalanceDest": 0.0, "step": 30},
+    {"type": None, "amount": None, "oldbalanceOrg": 0.0, "oldbalanceDest": 10.0, "step": 3},
+    {"type": "CASH_OUT", "amount": 1000.0, "oldbalanceOrg": 1000.0, "oldbalanceDest": 0.0, "step": 400},
+    {"type": "DEBIT", "amount": "123.5", "oldbalanceOrg": "abc", "oldbalanceDest": float("nan"), "step": 5},
+    {"type": "TRANSFER", "amount": 10.0},
+]
+
+
+@pytest.mark.parametrize("feature_set", ["E5", "E6", "E7"])
+def test_transform_one_matches_batch_transform(feature_set, transactions):
+    """The API hot path (transform_one) must produce exactly the training features."""
+    p = FeaturePipeline(feature_set, max_amount=1000.0).fit(transactions)
+    cols = ["type", "amount", "oldbalanceOrg", "oldbalanceDest", "step"]
+    records = transactions[cols].sample(500, random_state=0).to_dict("records") + EDGE_RECORDS
+    batch = p.transform(pd.DataFrame.from_records(records)).to_numpy()
+    single = np.vstack([p.transform_one(r) for r in records])
+    np.testing.assert_array_equal(single, batch)
+
+
+def test_score_matches_batch_predict_proba(model_dir, transactions):
+    predictor = FraudPredictor.load(model_dir)
+    records = transactions[predictor.pipeline.required_inputs].sample(200, random_state=2).to_dict("records")
+    records += EDGE_RECORDS
+    fast = np.array([predictor.score(r)["fraud_probability"] for r in records])
+    np.testing.assert_allclose(fast, predictor.predict_proba(records), rtol=1e-6)
+
+
 def test_artifacts_contain_schema_threshold_and_medians(model_dir):
     meta = json.loads((model_dir / "metadata.json").read_text())
     pipe = json.loads((model_dir / "pipeline.json").read_text())
