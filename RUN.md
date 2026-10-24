@@ -30,10 +30,10 @@ Writes `models/e5_v1/`, `models/e6_v1/`, `models/e7_v1/` and the report `models/
 
 ```bash
 pytest                                                    # all unit + API + config tests (no dataset needed)
-RUN_DEPLOY_TESTS=1 pytest tests/test_deploy_config.py     # also start Nginx + A + B and check routing
+RUN_DEPLOY_TESTS=1 pytest tests/test_deploy_config.py     # also start Nginx + 6 instances and check routing
 ```
 
-The second command needs ports 8001, 8002 and 8080 free, and stops everything when it finishes.
+The second command needs ports 8001–8006 and 8080 free, and stops everything when it finishes.
 
 ## 4. Run the API: single instance (development)
 
@@ -45,18 +45,18 @@ MODEL_DIR=models/e7_v1 uvicorn api.main:app --reload --reload-dir src --reload-d
 - `--reload-dir` keeps the file watcher off `venv/`; plain `--reload` watches everything and burns CPU.
 - Each request prints its timing; add `TIMING_LOG=0` in front to turn that off.
 
-## 5. Run the API: load balanced (Nginx + 2 instances)
+## 5. Run the API: load balanced (Nginx + 6 instances)
 
 ```bash
-deploy/start.sh        # instance A :8001, instance B :8002, then nginx -t and Nginx :8080
+deploy/start.sh        # instances 1-6 on :8001-:8006, then nginx -t and Nginx :8080
 deploy/stop.sh         # stop everything
 ```
 
 Start or stop one part only (e.g. to test failures):
 
 ```bash
-deploy/stop.sh a       # a | b | nginx
-deploy/start.sh a
+deploy/stop.sh 3       # 1..6 | nginx
+deploy/start.sh 3
 ```
 
 Check it:
@@ -73,7 +73,7 @@ curl -X POST localhost:8080/predict -H 'content-type: application/json' -d '{
 See which instance served each request:
 
 ```bash
-tail -f deploy/run/access.log          # upstream=127.0.0.1:8001 (A) / 127.0.0.1:8002 (B)
+tail -f deploy/run/access.log          # upstream=127.0.0.1:800N = instance N
 ```
 
 Options (environment variables for `deploy/start.sh`):
@@ -83,7 +83,8 @@ Options (environment variables for `deploy/start.sh`):
 | `MODEL_DIR` | `models/e7_v1` | Model artifacts both instances serve |
 | `WORKERS_PER_INSTANCE` | `1` | uvicorn workers per instance |
 | `ACCOUNT_SNAPSHOT` | none | JSON file `{"account_id": balance}` for the in-memory account service |
-| `CPUS_A`, `CPUS_B`, `CPUS_NGINX` | none | CPU pinning with `taskset`, e.g. `0-1` |
+| `CPUS_INSTANCES` | none | CPU pinning with `taskset`: one list for all instances (`0-7`), or one per instance (`"0 1 2 3 4 5"`) |
+| `CPUS_NGINX` | none | CPU pinning for Nginx, e.g. `0-7` |
 | `LOG_LEVEL` | `warning` | `info` logs one line per request in each instance log |
 | `TIMING_LOG` | `0` | `1` prints per-request timings (feature / model / total ms) |
 
@@ -91,8 +92,7 @@ Options (environment variables for `deploy/start.sh`):
 
 | File | Contents |
 |---|---|
-| `deploy/run/instance_a.log` | Instance A (:8001) |
-| `deploy/run/instance_b.log` | Instance B (:8002) |
+| `deploy/run/instance_<n>.log` | Instance n (:800n), n = 1..6 |
 | `deploy/run/access.log` | Nginx: every request, its status, time, and which instance served it (`upstream=`) |
 | `deploy/run/error.log` | Nginx: instance down, refused connections, timeouts |
 
@@ -102,9 +102,8 @@ By default the instance logs only show startup, warnings and errors. To see ever
 deploy/stop.sh
 LOG_LEVEL=info deploy/start.sh                  # add TIMING_LOG=1 for timings too
 
-tail -f deploy/run/instance_a.log               # one terminal per instance
-tail -f deploy/run/instance_b.log
-tail -f deploy/run/instance_*.log               # or both together, labelled by file
+tail -f deploy/run/instance_1.log               # one instance
+tail -f deploy/run/instance_*.log               # all six together, labelled by file
 ```
 
 Don't benchmark with `LOG_LEVEL=info` or `TIMING_LOG=1`: writing a line per request slows the instances down.
@@ -116,17 +115,17 @@ The log files are appended to across restarts. To start clean: `deploy/stop.sh &
 Start the stack pinned to separate cores, then run `wrk` on the remaining cores:
 
 ```bash
-CPUS_A=0-1 CPUS_B=2-3 CPUS_NGINX=4-5 deploy/start.sh
+CPUS_INSTANCES=0-7 CPUS_NGINX=0-7 deploy/start.sh
 
-taskset -c 8-15 wrk -t4 -c100 -d30s --latency -s tests/wrk_predict.lua http://127.0.0.1:8080   # through Nginx
-taskset -c 8-15 wrk -t4 -c100 -d30s --latency -s tests/wrk_predict.lua http://127.0.0.1:8001   # instance A only
+taskset -c 8-15 wrk -t8 -c100 -d30s --latency -s tests/wrk_predict.lua http://127.0.0.1:8080   # through Nginx
+taskset -c 8-15 wrk -t8 -c100 -d30s --latency -s tests/wrk_predict.lua http://127.0.0.1:8001   # instance 1 only
 
 deploy/stop.sh
 ```
 
 The last line of output (`RESULT ...`) has req/s, p50/p95/p99, non-200 responses and socket errors. Watch CPU in a second terminal with `top`.
 
-Benchmark rules: stop any other API server first (`ss -ltnp | grep -E ':800[0-2]|:8080'` should show only yours), and keep duration, concurrency and CPU pinning the same between runs you compare.
+Benchmark rules: stop any other API server first (`ss -ltnp | grep -E ':800[0-6]|:8080'` should show only yours), and keep duration, concurrency and CPU pinning the same between runs you compare.
 
 Python load tester (no `wrk` needed, but tops out around 2,000 req/s by itself):
 
@@ -136,17 +135,19 @@ python tests/load_api.py --url http://127.0.0.1:8080 --requests 4000 --concurren
 
 ## 7. Failure test (manual)
 
+Full manual guide (baseline, distribution, failover, slow instances, 80% capacity budget, saturation): **[RELIABILITY_TESTING.md](RELIABILITY_TESTING.md)**. Quick version:
+
 ```bash
 deploy/start.sh
-taskset -c 8-15 wrk -t2 -c20 -d20s -s tests/wrk_predict.lua http://127.0.0.1:8080 &
-sleep 5;  deploy/stop.sh a        # A goes down: traffic should move to B
-sleep 7;  deploy/start.sh a       # A comes back: traffic returns after ~2.5 s
+taskset -c 8-15 wrk -t4 -c60 -d20s -s tests/wrk_predict.lua http://127.0.0.1:8080 &
+sleep 5;  deploy/stop.sh 3        # instance 3 goes down: the other five take its traffic
+sleep 7;  deploy/start.sh 3       # it comes back: traffic returns after ~2.5 s
 wait
 grep -o 'upstream=[^ ]*' deploy/run/access.log | sort | uniq -c
 deploy/stop.sh
 ```
 
-Expected: a few failed requests (in flight on A when it stopped), then everything served by B, then both again.
+Expected: a few dozen failed requests at most (in flight on instance 3 when it stopped), then the other five serve everything, then all six again.
 
 ## 8. Benchmark only the scoring code
 
@@ -160,8 +161,8 @@ Run it as a module (`-m`). `python src/benchmark_features.py` fails to import `s
 
 | Problem | Fix |
 |---|---|
-| `address already in use` | Something is on 8000/8001/8002/8080: `ss -ltnp \| grep -E ':800[0-2]\|:8080'`, then stop it or run `deploy/stop.sh` |
-| `deploy/start.sh` says an instance didn't become healthy | Read `deploy/run/instance_a.log` (or `_b`); usually a wrong `MODEL_DIR` or models not trained yet |
+| `address already in use` | Something is on 8000–8006/8080: `ss -ltnp \| grep -E ':800[0-6]\|:8080'`, then stop it or run `deploy/stop.sh` |
+| `deploy/start.sh` says an instance didn't become healthy | Read `deploy/run/instance_<n>.log`; usually a wrong `MODEL_DIR` or models not trained yet |
 | Nginx won't start | `nginx -t -p "$PWD/deploy/" -c nginx/nginx.conf -e run/error.log`, then read `deploy/run/error.log` |
 | `503 fraud scoring temporarily unavailable` | Both instances are down, or saturated (over 64 in-flight requests each) |
 | `ModuleNotFoundError: src` | Run from the project root, with `python -m ...` |

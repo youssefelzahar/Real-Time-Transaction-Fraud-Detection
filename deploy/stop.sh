@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Stop Nginx and/or the FastAPI instances started by deploy/start.sh.
-#   deploy/stop.sh             # everything
-#   deploy/stop.sh a           # only instance A (failure testing)
-#   deploy/stop.sh b | nginx
+#   deploy/stop.sh             # Nginx, then every instance
+#   deploy/stop.sh 3           # only instance 3 (failure testing)
+#   deploy/stop.sh nginx
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -33,11 +33,15 @@ stop_nginx() {
 }
 
 case "${1:-all}" in
-    a)     stop_pidfile "$RUN/instance_a.pid" "instance a" ;;
-    b)     stop_pidfile "$RUN/instance_b.pid" "instance b" ;;
     nginx) stop_nginx ;;
     all)   stop_nginx
-           stop_pidfile "$RUN/instance_a.pid" "instance a"
-           stop_pidfile "$RUN/instance_b.pid" "instance b" ;;
-    *)     echo "usage: $0 [all|a|b|nginx]" >&2; exit 2 ;;
+           shopt -s nullglob
+           for f in "$RUN"/instance_*.pid; do
+               n="${f##*/instance_}"; stop_pidfile "$f" "instance ${n%.pid}"
+           done ;;
+    *)     if [[ "$1" =~ ^[0-9]+$ ]]; then
+               stop_pidfile "$RUN/instance_$1.pid" "instance $1"
+           else
+               echo "usage: $0 [all|nginx|<instance number>]" >&2; exit 2
+           fi ;;
 esac

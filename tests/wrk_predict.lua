@@ -1,5 +1,6 @@
 -- wrk script for POST /predict with varied payloads (same distribution as tests/load_api.py).
 -- Usage: wrk -t4 -c100 -d30s --latency -s tests/wrk_predict.lua http://127.0.0.1:8000
+-- Paced (rate-limited) variant: tests/wrk_paced.lua
 
 local TYPES = {"CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"}
 local N_PAYLOADS = 1000
