@@ -1,0 +1,8 @@
+{
+  "policy_version": "dp-e7-2026-10-26.1",
+  "approve_threshold": 0.54,
+  "decline_threshold": 0.999,
+  "decline_mode": "shadow",
+  "valid_for_models": ["e7_v1", "e7_v2"],
+  "notes": "approve_threshold: chosen on validation (steps 281-354) with cost 100*FN + 1*FP (models/e7_v2 metadata). decline_threshold: PROVISIONAL - validation only: 561 would be declined, 24 of them legitimate; no cost for a false decline is defined yet, so decline runs in shadow mode (reported as review, counted as would_decline). See DECISION_POLICY.md."
+}

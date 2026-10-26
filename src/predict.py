@@ -8,7 +8,6 @@ from xgboost import XGBClassifier
 from time import perf_counter
 
 from src.data_preprocessing import FeaturePipeline
-from src.decision_engine import decide
 
 # Per-request timing print; set TIMING_LOG=0 to turn it off (e.g. during load tests).
 TIMING_LOG = os.getenv("TIMING_LOG", "1") == "1"
@@ -53,7 +52,8 @@ class FraudPredictor:
 
     def score(self, record):
         """Single-record hot path: no DataFrame, numpy straight into the booster.
-        Column order is guaranteed by the schema check in __init__."""
+        Column order is guaranteed by the schema check in __init__.
+        Returns model output only; the business decision is made by DecisionEngine."""
         t0 = perf_counter()
         x = self.pipeline.transform_one(record)
         feature_ms = (perf_counter() - t0) * 1000
@@ -64,11 +64,8 @@ class FraudPredictor:
 
         t2 = perf_counter()
         missing = [name for name, v in zip(self.feature_names, x) if v != v]
-        decision = decide(probability, self.threshold)
         response = {
             "fraud_probability": probability,
-            "decision": decision,
-            "threshold": self.threshold,
             "model_version": self.model_version,
             "missing_features": missing,
         }

@@ -87,6 +87,7 @@ Options (environment variables for `deploy/start.sh`):
 | `CPUS_NGINX` | none | CPU pinning for Nginx, e.g. `0-7` |
 | `LOG_LEVEL` | `warning` | `info` logs one line per request in each instance log |
 | `TIMING_LOG` | `0` | `1` prints per-request timings (feature / model / total ms) |
+| `DECISION_POLICY` | `config/decision_policy.json` | Decision policy file (thresholds, decline mode). Instances refuse to start if it isn't validated for `MODEL_DIR`'s model |
 
 ### Logs
 
@@ -149,7 +150,17 @@ deploy/stop.sh
 
 Expected: a few dozen failed requests at most (in flight on instance 3 when it stopped), then the other five serve everything, then all six again.
 
-## 8. Benchmark only the scoring code
+## 8. Decision policy and metrics
+
+```bash
+python -m src.decision_policy_analysis --model-dir models/e7_v2   # validation-only threshold evidence
+curl -s localhost:8001/metrics/decisions | python3 -m json.tool    # one instance's decision counters
+python tests/decision_metrics.py                                  # all six instances summed
+```
+
+`/metrics/decisions` is internal: it answers on each instance (`:8001`–`:8006`) and returns 404 through Nginx (`:8080`). See [DECISION_POLICY.md](DECISION_POLICY.md) for the policy, its evidence, and how to switch decline from shadow to enforce.
+
+## 9. Benchmark only the scoring code
 
 ```bash
 TIMING_LOG=0 python -m src.benchmark_features

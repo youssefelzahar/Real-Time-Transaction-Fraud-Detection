@@ -31,7 +31,7 @@ MODEL_DIR=models/e6_v1 ACCOUNT_SNAPSHOT=balances.json uvicorn api.main:app --rel
 | `src/train.py` | Trains E5/E6/E7, picks the threshold on validation, evaluates once on test, runs shortcut checks, saves artifacts + report |
 | `src/evaluate.py` | Cost function, threshold selection, metrics, leakage/shortcut checks |
 | `src/predict.py` | `FraudPredictor`: loads artifacts, checks the model and pipeline schemas match, scores records |
-| `src/decision_engine.py` | Probability to `approve` / `review` |
+| `src/decision_engine.py` | Score to `approve` / `review` / `decline` with a configurable policy (`config/decision_policy.json`, see [DECISION_POLICY.md](DECISION_POLICY.md)) |
 | `api/main.py` | FastAPI `/predict` and `/health` |
 
 Chronological split: train steps 1-280, validation 281-354, test 355-743. Business cost = `100 x FN + 1 x FP`.
@@ -80,7 +80,8 @@ The client sends only transaction fields. Pre-transaction balances are **not** a
 | `step` | request, only for E5 models (`hour`) |
 | `oldbalanceOrg`, `oldbalanceDest` | account service, looked up by sender/receiver ID (source of truth) |
 | `sender_balance`, `receiver_balance` (optional) | request: fallback only when the account service has no balance for that account |
-| type medians, `max_amount`, threshold | model artifacts |
+| type medians, `max_amount` | model artifacts |
+| `approve_threshold`, `decline_threshold`, `decline_mode` | decision policy (`config/decision_policy.json`) |
 
 Unknown accounts are still scored, and the affected features are listed in `missing_features`. `balance_source` in the response shows where each balance came from (`account_service`, `request` or `missing`). Swagger (`/docs`) has ready-made request examples in the **Examples** dropdown of `POST /predict`.
 
@@ -91,16 +92,22 @@ POST /predict
 ```
 
 ```json
-{"transaction_id": "tx-001", "fraud_probability": 0.99999988, "decision": "review",
- "threshold": 0.99, "model_version": "e6_v1", "missing_features": []}
+{"transaction_id": "tx-001", "fraud_probability": 0.9999, "decision": "review",
+ "reason_code": "HIGH_RISK", "threshold": 0.54, "decision_policy_version": "dp-e7-2026-10-26.1",
+ "model_version": "e7_v2", "missing_features": [],
+ "balance_source": {"sender": "request", "receiver": "request"}}
 ```
 
-A merchant receiver with no balance on record:
+| Field | Meaning |
+|---|---|
+| `fraud_probability` | Model risk score in [0, 1]. **Not calibrated**: read it as a score (see DECISION_POLICY.md) |
+| `decision` | `approve`, `review` or `decline`. `decline` only appears when the policy's `decline_mode` is `enforce`; the current policy runs decline in **shadow** mode |
+| `reason_code` | `LOW_RISK` (approve), `REVIEW_THRESHOLD` (review band), `HIGH_RISK` (decline, or review in shadow mode) |
+| `threshold` | Unchanged meaning: scores at or above it are not auto-approved (the policy's `approve_threshold`) |
+| `decision_policy_version` | Policy that made the decision |
+| `model_version` | Model that produced the score |
 
-```json
-{"transaction_id": "tx-002", "fraud_probability": 1.45e-08, "decision": "approve",
- "threshold": 0.99, "model_version": "e6_v1", "missing_features": ["oldbalanceDest", "dest_bal_zero"]}
-```
+A scoring failure returns `500 {"detail": "internal scoring error"}`. That's a technical error, not a decline, and should not be resent automatically.
 
 ## Deployment: Nginx load balancer + six API instances
 

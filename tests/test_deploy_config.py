@@ -66,6 +66,12 @@ def test_unavailable_returns_503_json():
     assert re.search(r"return 503 '\{\"detail\"", DIRECTIVES)
 
 
+def test_metrics_blocked_on_public_port():
+    public = re.split(r"^\s*server\s*\{", DIRECTIVES, flags=re.M)[1]   # the :8080 server block
+    assert "listen 127.0.0.1:8080" in public
+    assert re.search(r"location\s+/metrics/\s*\{\s*return 404;", public)
+
+
 def test_timeout_returns_504_json():
     assert re.search(r"error_page\s+504\s*=\s*@timeout", DIRECTIVES)
     assert re.search(r"return 504 '\{\"detail\"", DIRECTIVES)
@@ -120,8 +126,16 @@ def test_requests_through_nginx_reach_all_instances():
         assert set(upstreams) == set(INSTANCE_ADDRS)
         # Same answer from every instance and through Nginx; response schema unchanged.
         assert len({r["fraud_probability"] for r in via_nginx + direct}) == 1
-        assert {r["model_version"] for r in via_nginx + direct} == {"e7_v1"}
-        assert set(via_nginx[0]) == {"transaction_id", "fraud_probability", "decision", "threshold",
-                                     "model_version", "missing_features", "balance_source"}
+        # One model and one decision policy across every instance (whichever MODEL_DIR /
+        # DECISION_POLICY the stack was started with).
+        served = httpx.get("http://127.0.0.1:8080/health").json()["model_version"]
+        assert {r["model_version"] for r in via_nginx + direct} == {served}
+        assert len({r["decision_policy_version"] for r in via_nginx + direct}) == 1
+        assert set(via_nginx[0]) == {"transaction_id", "fraud_probability", "decision", "reason_code",
+                                     "threshold", "decision_policy_version", "model_version",
+                                     "missing_features", "balance_source"}
+        # Decision metrics are internal: reachable on an instance, not through the public port.
+        assert httpx.get("http://127.0.0.1:8001/metrics/decisions").status_code == 200
+        assert httpx.get("http://127.0.0.1:8080/metrics/decisions").status_code == 404
     finally:
         subprocess.run([str(DEPLOY / "stop.sh")], cwd=ROOT)

@@ -7,7 +7,7 @@
 #   deploy/start.sh nginx
 # Config (env): MODEL_DIR (default models/e7_v1), WORKERS_PER_INSTANCE (default 1),
 #   ACCOUNT_SNAPSHOT, LOG_LEVEL (default warning; `info` logs every request),
-#   TIMING_LOG (default 0; 1 prints timings),
+#   TIMING_LOG (default 0; 1 prints timings), DECISION_POLICY (default config/decision_policy.json),
 #   CPUS_INSTANCES (taskset CPU list for all instances, e.g. 0-7; or one list per
 #   instance separated by spaces, e.g. "0 1 2 3 4 5"), CPUS_NGINX. Empty = no pinning.
 set -euo pipefail

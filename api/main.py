@@ -6,19 +6,27 @@ the source of truth. `sender_balance` / `receiver_balance` in the request are on
 fallback for accounts the service does not know (e.g. local testing in Swagger); the
 response reports which source each balance came from.
 
-Run:  MODEL_DIR=models/e6_v1 uvicorn api.main:app --reload
+The model returns a fraud score; the DecisionEngine turns it into approve / review /
+decline using the policy in DECISION_POLICY (default config/decision_policy.json).
+
+Run:  MODEL_DIR=models/e7_v2 uvicorn api.main:app --reload
 """
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal, Optional, Protocol
 
 from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from src.decision_engine import DEFAULT_POLICY_PATH, DecisionEngine, DecisionPolicy
 from src.predict import TIMING_LOG, FraudPredictor
 from time import perf_counter
+
+log = logging.getLogger("nilepay.api")
 
 class AccountService(Protocol):
     def get_balance(self, account_id: str) -> Optional[float]:
@@ -57,8 +65,12 @@ class TransactionRequest(BaseModel):
 class ScoreResponse(BaseModel):
     transaction_id: Optional[str]
     fraud_probability: float
-    decision: Literal["approve", "review"]
+    decision: Literal["approve", "review", "decline"]
+    reason_code: Literal["LOW_RISK", "REVIEW_THRESHOLD", "HIGH_RISK"]
+    # Unchanged meaning: scores at or above this are not auto-approved
+    # (now the policy's approve_threshold).
     threshold: float
+    decision_policy_version: str
     model_version: str
     missing_features: list[str]
     balance_source: dict[str, Literal["account_service", "request", "missing"]]
@@ -124,10 +136,22 @@ async def lifespan(app: FastAPI):
         app.state.predictor = FraudPredictor.load(os.getenv("MODEL_DIR", "models/e6_v1"))
     if not hasattr(app.state, "account_service"):
         app.state.account_service = InMemoryAccountService.from_env()
+    if not hasattr(app.state, "decision_engine"):
+        policy = DecisionPolicy.from_file(os.getenv("DECISION_POLICY", DEFAULT_POLICY_PATH))
+        app.state.decision_engine = DecisionEngine(policy)
+    # Refuse to start with thresholds that were not validated for this model.
+    app.state.decision_engine.policy.check_model(app.state.predictor.model_version)
     yield
 
 
 app = FastAPI(title="NilePay Fraud Scoring", lifespan=lifespan)
+
+
+@app.get("/metrics/decisions", include_in_schema=False)
+def decision_metrics(request: Request):
+    """Internal: decision counters for this instance (blocked on the public Nginx port)."""
+    return {**request.app.state.decision_engine.metrics.snapshot(),
+            "model_version": request.app.state.predictor.model_version}
 
 
 @app.get("/health")
@@ -174,8 +198,16 @@ async def predict(
         "step": tx.step,
     }
 
+    engine = request.app.state.decision_engine
     model_start = perf_counter()
-    result = predictor.score(record)
+    try:
+        result = predictor.score(record)
+        decision = engine.decide(result["fraud_probability"])
+    except Exception:
+        # Technical failure, not a fraud decision. No payload in the log, no stack
+        # trace in the response, no automatic retry.
+        log.exception("scoring failed for transaction_id=%s", tx.transaction_id)
+        return JSONResponse(status_code=500, content={"detail": "internal scoring error"})
     model_ms = (perf_counter() - model_start) * 1000
 
     total_ms = (perf_counter() - start) * 1000
@@ -190,6 +222,10 @@ async def predict(
     return ScoreResponse(
         transaction_id=tx.transaction_id,
         **result,
+        decision=decision.decision,
+        reason_code=decision.reason_code,
+        threshold=engine.policy.approve_threshold,
+        decision_policy_version=decision.policy_version,
         balance_source={
             "sender": sender_source,
             "receiver": receiver_source,
