@@ -26,6 +26,11 @@ def topics():
     for f in admin.create_topics([NewTopic(n, num_partitions=2, replication_factor=1) for n in names]).values():
         f.result(timeout=10)
     yield names
+    if os.name == "nt":
+        # Never delete topics on a Windows broker: it cannot rename/delete segment files it has
+        # memory-mapped (KAFKA-1194), marks the log dir failed and shuts down. The small temporary
+        # topics are left behind (nilepay.test-events-*), not the live ones.
+        return
     for f in admin.delete_topics(list(names)).values():
         f.result(timeout=10)
 
@@ -77,7 +82,7 @@ def test_api_event_reaches_consumer_store(topics, tmp_path, model_dir):
             responses = [c.post("/predict", json={**body, "transaction_id": f"it-{i}"}).json() for i in range(5)]
         # leaving the client ran the lifespan shutdown: publisher flushed and closed
         pub = app.state.event_publisher
-        assert pub.delivered == 5 and pub.lost_on_shutdown == 0
+        assert pub.delivered == 5 and pub.unconfirmed_at_shutdown == 0
     finally:
         for name in ("predictor", "account_service", "decision_engine", "event_publisher"):
             delattr(app.state, name)
@@ -123,3 +128,91 @@ def test_invalid_and_duplicate_messages_on_real_broker(topics, tmp_path):
     c.close()
     assert sorted(h["error"].decode().split(":")[0] for h in dead) == ["invalid JSON", "schema violation"]
     assert all(h["source_topic"].decode() == topic for h in dead)
+
+
+def _consumer_process(topic, dlq, group, store_dir, stop_file):
+    import subprocess
+    import sys
+    from pathlib import Path
+    env = {k: v for k, v in os.environ.items() if not k.startswith("KAFKA_")}
+    env.update(KAFKA_BOOTSTRAP_SERVERS=BOOTSTRAP, KAFKA_TOPIC_PREDICTIONS=topic, KAFKA_TOPIC_DLQ=dlq,
+               KAFKA_CONSUMER_GROUP=group, EVENT_STORE_DIR=str(store_dir), NILEPAY_STOP_FILE=str(stop_file),
+               CONSUMER_COMMIT_INTERVAL_S="1")
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    return subprocess.Popen([sys.executable, "-m", "src.event_consumer"], cwd=Path(__file__).resolve().parent.parent,
+                            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, creationflags=flags)
+
+
+def _stored_ids(store_dir):
+    return [json.loads(line)["event_id"] for f in store_dir.glob("prediction-events-*.jsonl")
+            for line in f.read_text().splitlines()]
+
+
+def _produce(topic, n, prefix):
+    from confluent_kafka import Producer
+    from src.events import build_prediction_event
+    p = Producer({"bootstrap.servers": BOOTSTRAP})
+    for i in range(n):
+        e = build_prediction_event({"transaction_id": f"{prefix}-{i}", "fraud_probability": 0.1, "decision": "approve",
+                                    "reason_code": "LOW_RISK", "threshold": 0.54, "decision_policy_version": "dp",
+                                    "model_version": "m", "missing_features": [], "balance_source": {}},
+                                   transaction_type="PAYMENT", would_decline=False)
+        p.produce(topic, value=json.dumps(e).encode(), key=e["transaction_id"].encode())
+    assert p.flush(10) == 0
+
+
+def _wait(cond, timeout):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if cond():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_consumer_graceful_stop_restart_reassigns_at_once(topics, tmp_path):
+    """Real consumer process: stop file -> finishes, commits, leaves the group; the restarted
+    process gets the partitions without waiting for a session timeout and resumes exactly at the
+    committed offsets (no event stored twice, none skipped)."""
+    from confluent_kafka import Consumer, TopicPartition
+    topic, dlq = topics
+    group, store, stop = f"nilepay-test-{uuid.uuid4().hex[:8]}", tmp_path / "store", tmp_path / "consumer.stop"
+    store.mkdir()
+
+    first = _consumer_process(topic, dlq, group, store, stop)
+    try:
+        _produce(topic, 40, "a")
+        assert _wait(lambda: len(_stored_ids(store)) == 40, 30)
+        t0 = time.monotonic()
+        stop.write_text("now")
+        assert first.wait(timeout=15) == 0
+        stop_s = time.monotonic() - t0
+    finally:
+        if first.poll() is None:
+            first.kill()
+    log = first.stdout.read().decode(errors="replace")
+    assert "stop requested" in log and "left group" in log
+    assert stop_s < 5
+
+    c = Consumer({"bootstrap.servers": BOOTSTRAP, "group.id": group})
+    committed = c.committed([TopicPartition(topic, p) for p in range(2)], timeout=10)
+    c.close()
+    assert sum(tp.offset for tp in committed if tp.offset > 0) == 40          # everything stored was committed
+
+    stop.unlink()
+    _produce(topic, 20, "b")                                                 # arrives while no consumer runs
+    t1 = time.monotonic()
+    second = _consumer_process(topic, dlq, group, store, stop)
+    try:
+        assert _wait(lambda: len(_stored_ids(store)) >= 60, 30)
+        resume_s = time.monotonic() - t1
+        stop.write_text("now")
+        second.wait(timeout=15)
+    finally:
+        if second.poll() is None:
+            second.kill()
+    ids = _stored_ids(store)
+    assert len(ids) == 60 and len(set(ids)) == 60                             # no duplicates, nothing skipped
+    # Far below the 45 s session timeout a force-killed member would cost. Includes process start.
+    assert resume_s < 15, f"restart-to-processing {resume_s:.1f}s"
+    print(f"\ngraceful stop {stop_s:.2f}s, restart-to-processing {resume_s:.2f}s")

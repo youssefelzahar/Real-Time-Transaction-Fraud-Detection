@@ -263,3 +263,22 @@ def test_metrics_snapshot():
     m = runner.metrics()
     assert m["stored"] == 1 and m["dead_lettered"] == 1 and m["by"]["decision"] == {"approve": 1}
     assert m["event_latency_ms"]["p50"] is not None
+
+
+def test_lag_after_restart_uses_committed_offset_not_log_start():
+    """Right after (re)assignment position() is unset until a partition is fetched; lag must be
+    measured from the committed offset (where consumption resumes), not from offset 0."""
+    from confluent_kafka import TopicPartition
+
+    class LagConsumer:
+        ends = {0: 400, 1: 387}
+        positions = {0: -1001, 1: 387}          # 0: not fetched yet since assignment
+        commits = {0: 400, 1: 386}
+
+        def assignment(self): return [TopicPartition("events", p) for p in self.ends]
+        def get_watermark_offsets(self, tp, timeout, cached): return 0, self.ends[tp.partition]
+        def position(self, tps): return [TopicPartition(tp.topic, tp.partition, self.positions[tp.partition]) for tp in tps]
+        def committed(self, tps, timeout): return [TopicPartition(tp.topic, tp.partition, self.commits[tp.partition]) for tp in tps]
+
+    runner = ConsumerRunner(LagConsumer(), processor(), FakeDlq(), "events.dlq")
+    assert runner.lag() == {"events[0]": 0, "events[1]": 0}

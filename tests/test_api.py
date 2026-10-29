@@ -267,7 +267,7 @@ def test_buffer_full_still_returns_predictions(model_dir):
     reset_state()
     assert statuses == [200] * 5
     assert m["enqueued"] == 2 and m["buffer_full_drops"] == 3 and m["queue_utilization"] == 1.0
-    assert pub.lost_on_shutdown == 2                    # counted when the app shut down
+    assert pub.unconfirmed_at_shutdown == 2                    # counted when the app shut down
 
 
 def test_event_metrics_endpoint_hidden_from_openapi(events_client):

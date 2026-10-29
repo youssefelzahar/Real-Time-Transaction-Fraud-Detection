@@ -20,6 +20,7 @@ RUN="$ROOT/deploy/run"
 PYTHON="${PYTHON:-$ROOT/venv/bin/python}"
 export MODEL_DIR="${MODEL_DIR:-models/e7_v1}"
 export TIMING_LOG="${TIMING_LOG:-0}"
+export EVENT_LEDGER_DIR="${EVENT_LEDGER_DIR:-$RUN}"   # producer ledger: final counters per instance process
 WORKERS="${WORKERS_PER_INSTANCE:-1}"
 LOG_LEVEL="${LOG_LEVEL:-warning}"
 read -r -a CPU_LISTS <<< "${CPUS_INSTANCES:-}"

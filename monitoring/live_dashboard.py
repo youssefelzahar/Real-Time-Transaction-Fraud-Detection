@@ -14,6 +14,7 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -28,7 +29,9 @@ BOOTSTRAP = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")
 TOPIC = os.getenv("KAFKA_TOPIC_PREDICTIONS", "nilepay.prediction-events")
 GROUP = os.getenv("KAFKA_CONSUMER_GROUP", "nilepay-prediction-monitor")
 STORE_DIR = Path(os.path.expanduser(os.getenv("EVENT_STORE_DIR", "~/.local/share/nilepay-events")))
+LEDGER_DIR = Path(os.getenv("EVENT_LEDGER_DIR") or ROOT / "deploy" / "run")
 FEED_SIZE = 14
+HEARTBEAT_MAX_AGE_S = 30   # 3x the consumer's metrics_interval_s
 
 # Sample transactions for the "send one" buttons (no real customer data).
 SAMPLES = {
@@ -41,6 +44,65 @@ SAMPLES = {
     "risky_cash_out": {"type": "CASH_OUT", "amount": 850002.52, "sender_id": "C-demo-6", "receiver_id": "C-demo-7",
                        "sender_balance": 850002.52, "receiver_balance": 0.0},
 }
+
+
+def pid_alive(pid):
+    """True if the process exists. Never signals it: on Windows os.kill(pid, 0) is not a probe,
+    signal 0 is CTRL_C_EVENT (it raises OSError across consoles, or delivers Ctrl+C)."""
+    if os.name == "nt":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, pid)                     # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        code = ctypes.c_ulong()
+        ok = k32.GetExitCodeProcess(handle, ctypes.byref(code))
+        k32.CloseHandle(handle)
+        return bool(ok) and code.value == 259                             # STILL_ACTIVE
+    try:
+        os.kill(pid, 0)
+    except PermissionError:   # exists, owned by another user
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def ledger_summary(directory, current_pids):
+    """Producer totals of API processes that already ended, from the per-instance ledgers that
+    src/events.py ProducerLedger writes (a start line, then a stop line with final counters).
+
+    Each ended process is counted once, from its own stop line, never by adding up polls.
+    A start with no stop, whose PID is not a running instance process, ended without accounting
+    (force-killed or crashed): counted as a process, its events as unknown, never as lost."""
+    out = {"ended_processes": 0, "enqueued": 0, "delivered": 0, "not_sent": 0, "delivery_failed": 0,
+           "unconfirmed_at_shutdown": 0, "ended_without_record": 0, "since": None}
+    for path in sorted(Path(directory).glob("producer-ledger-instance-*.jsonl")):
+        open_starts = {}                                   # pid -> start record; lines are in time order
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                rec = json.loads(line)
+                kind, pid = rec["record"], rec["pid"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if kind == "start":
+                if pid in open_starts:                     # PID reused: the earlier process never stopped
+                    out["ended_without_record"] += 1
+                open_starts[pid] = rec
+            elif kind == "stop":
+                open_starts.pop(pid, None)
+                out["ended_processes"] += 1
+                out["enqueued"] += rec.get("enqueued", 0)
+                out["delivered"] += rec.get("delivered", 0)
+                out["not_sent"] += sum(rec.get(k, 0) for k in ("buffer_full_drops", "serialization_errors",
+                                                               "produce_errors"))
+                out["delivery_failed"] += sum((rec.get("failed") or {}).values())
+                out["unconfirmed_at_shutdown"] += rec.get("unconfirmed_at_shutdown", 0)
+                started = rec.get("process_started_at")
+                if started and (out["since"] is None or started < out["since"]):
+                    out["since"] = started
+        out["ended_without_record"] += sum(1 for pid in open_starts if pid not in current_pids)
+    return out
 
 
 def instance_ports():
@@ -149,20 +211,34 @@ class Collector:
             return {"up": False, "error": type(e).__name__}
 
     def consumer(self):
+        """running: PID alive and heartbeat fresh; starting: PID alive, started < 30 s ago, no heartbeat
+        from it yet; stalled: PID alive, heartbeat missing or old; stopped."""
         pid_file = ROOT / "deploy" / "run" / "consumer.pid"
-        alive = False
-        if pid_file.exists():
-            try:
-                os.kill(int(pid_file.read_text().strip()), 0)
-                alive = True
-            except (OSError, ValueError):
-                pass
+        try:
+            pid_ok = pid_alive(int(pid_file.read_text().strip()))
+            started = pid_file.stat().st_mtime
+        except (OSError, ValueError):
+            pid_ok, started = False, None
         metrics = None
         try:
             metrics = json.loads((STORE_DIR / "consumer_metrics.json").read_text())
         except (OSError, ValueError):
             pass
-        return {"alive": alive, "duplicates": (metrics or {}).get("duplicates"),
+        age = None
+        try:   # `at` is rewritten every metrics_interval_s (10 s), also when idle
+            at = datetime.fromisoformat(metrics["at"]).timestamp()
+            if at >= started - 1:   # older = written by a previous consumer process (`at` has 1 s resolution)
+                age = round(time.time() - at, 1)
+        except (TypeError, KeyError, ValueError):
+            pass
+        if not pid_ok:
+            state = "stopped"
+        elif age is not None and age <= HEARTBEAT_MAX_AGE_S:
+            state = "running"
+        else:
+            state = "starting" if age is None and time.time() - started <= HEARTBEAT_MAX_AGE_S else "stalled"
+        return {"alive": state == "running", "state": state, "heartbeat_age_s": age,
+                "duplicates": (metrics or {}).get("duplicates"),
                 "dead_lettered": (metrics or {}).get("dead_lettered"),
                 "latency_ms": (metrics or {}).get("event_latency_ms")}
 
@@ -173,8 +249,10 @@ class Collector:
             nginx = self.pool.submit(self.nginx)
             kafka = self.kafka()
             self.store.poll()
-            return {"t": time.time(), "nginx": nginx.result(), "instances": [f.result() for f in futures],
-                    "kafka": kafka, "consumer": self.consumer(),
+            instances = [f.result() for f in futures]
+            current_pids = {(x["events"] or {}).get("pid") for x in instances} - {None}
+            return {"t": time.time(), "nginx": nginx.result(), "instances": instances,
+                    "kafka": kafka, "consumer": self.consumer(), "ledger": ledger_summary(LEDGER_DIR, current_pids),
                     "store": {"lines": self.store.lines, "file": self.store.path.name if self.store.path else None},
                     "feed": self.store.feed()}
 
