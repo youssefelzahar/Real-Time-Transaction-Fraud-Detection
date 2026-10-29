@@ -241,12 +241,76 @@ def instance_stop(force, kafka_down=False):
     })
 
 
+class ResourceSampler(threading.Thread):
+    """CPU % (of one core) and RSS of the 6 instances and the consumer, every 0.5 s. The pidfiles
+    hold the venv launcher's PID, so its children (the real interpreter) are included."""
+
+    NAMES = [f"instance_{n}" for n in range(1, 7)] + ["consumer"]
+
+    def __init__(self):
+        super().__init__(daemon=True)
+        import psutil
+        self.procs, self.cpu, self.rss = {}, {}, {}
+        for name in self.NAMES:
+            try:
+                root = psutil.Process(int((RUN / f"{name}.pid").read_text()))
+                self.procs[name] = [root, *root.children(recursive=True)]
+                for p in self.procs[name]:
+                    p.cpu_percent(None)                       # prime
+            except Exception:
+                continue
+            self.cpu[name], self.rss[name] = [], []
+        self.stop_flag = threading.Event()
+
+    def run(self):
+        while not self.stop_flag.wait(0.5):
+            for name, procs in self.procs.items():
+                try:
+                    self.cpu[name].append(sum(p.cpu_percent(None) for p in procs))
+                    self.rss[name].append(sum(p.memory_info().rss for p in procs) / 2**20)
+                except Exception:
+                    pass
+
+    def summary(self):
+        self.stop_flag.set(), self.join()
+        inst = [n for n in self.cpu if n.startswith("instance") and self.cpu[n]]
+        out = {"instances_cpu_mean_pct_total": round(sum(sum(self.cpu[n]) / len(self.cpu[n]) for n in inst), 1),
+               "instances_rss_max_mb_total": round(sum(max(self.rss[n]) for n in inst), 1)}
+        if self.cpu.get("consumer"):
+            out["consumer_cpu_mean_pct"] = round(sum(self.cpu["consumer"]) / len(self.cpu["consumer"]), 1)
+            out["consumer_rss_max_mb"] = round(max(self.rss["consumer"]), 1)
+        return out
+
+
+def consumer_lag(timeout=20):
+    """Total committed lag of the consumer group, after waiting up to `timeout` s for it to drain."""
+    from confluent_kafka import Consumer, TopicPartition
+    topic = os.getenv("KAFKA_TOPIC_PREDICTIONS", "nilepay.prediction-events")
+    c = Consumer({"bootstrap.servers": os.environ["KAFKA_BOOTSTRAP_SERVERS"],
+                  "group.id": os.getenv("KAFKA_CONSUMER_GROUP", "nilepay-prediction-monitor")})
+    try:
+        parts = [TopicPartition(topic, p) for p in c.list_topics(topic, timeout=5).topics[topic].partitions]
+        end, lag = time.monotonic() + timeout, None
+        while time.monotonic() < end:
+            committed = c.committed(parts, timeout=5)
+            lag = sum(c.get_watermark_offsets(tp, timeout=5)[1] - max(tp.offset, 0) for tp in committed)
+            if lag == 0:
+                break
+            time.sleep(1)
+        return lag
+    finally:
+        c.close()
+
+
 def latency(kafka_down):
     if kafka_down:
         ctl("stop", "kafka")
     n0 = sum(1 for _ in open(RUN / "access.log", "rb"))
+    sampler = ResourceSampler()
+    sampler.start()
     out = subprocess.run([PY, "tests/load_api.py", "--url", NGINX, "--requests", "3000", "--concurrency", "10",
                           "--processes", "4"], cwd=ROOT, capture_output=True, text=True).stdout.strip().splitlines()
+    resources = sampler.summary()
     time.sleep(2)
     rts, statuses = [], []
     with open(RUN / "access.log", "rb") as f:
@@ -264,6 +328,8 @@ def latency(kafka_down):
         "client_p99_ms": float(cols[6]), "client_errors": int(cols[2]),
         "nginx_requests": len(rts), "nginx_p50_ms": pct(rts, 0.5), "nginx_p95_ms": pct(rts, 0.95),
         "nginx_p99_ms": pct(rts, 0.99), "nginx_non_200": sum(1 for s in statuses if s != "200"),
+        **resources,
+        "consumer_lag_after_run": None if kafka_down else consumer_lag(),
     })
 
 

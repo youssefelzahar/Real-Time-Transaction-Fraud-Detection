@@ -147,6 +147,14 @@ The consumer status is `running` only if its process is alive **and** it wrote a
   - A force-killed consumer re-reads events since its last commit (≤ 5 s). The duplicate filter is in memory and starts empty, so these can be stored twice.
 - **Neither path is exactly-once.** The measurements below found 0 lost and 0 duplicates in graceful runs, but that's a measured result, not a guarantee.
 
+### ML monitoring
+
+The dashboard has an **ML monitoring** section (score distribution, decisions, shadow would-declines, input quality against the training baseline, model performance once labels exist). The consumer computes it; see [ML_MONITORING.md](ML_MONITORING.md). One-time, after training:
+
+```bat
+venv\Scripts\python -m src.monitoring_baseline --model-dir models\e7_v1 --data data\fraud_data.csv
+```
+
 ### Reliability tests (repeatable)
 
 ```powershell

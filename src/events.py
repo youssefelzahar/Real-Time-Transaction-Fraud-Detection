@@ -41,8 +41,11 @@ RESPONSE_FIELDS = ("transaction_id", "fraud_probability", "decision", "reason_co
                    "decision_policy_version", "model_version", "missing_features", "balance_source")
 
 
-def build_prediction_event(response, *, transaction_type, would_decline, instance_id=None, scoring_ms=None):
-    """Event for one /predict response. `response` is the ScoreResponse as a dict."""
+def build_prediction_event(response, *, transaction_type, would_decline, instance_id=None, scoring_ms=None,
+                           feature_summary=None):
+    """Event for one /predict response. `response` is the ScoreResponse as a dict.
+    `feature_summary` (src/monitoring_features.py): coarse bins and flags for monitoring, never
+    the exact amounts or balances. Optional; consumers treat its absence as "not available"."""
     event = {
         "event_id": str(uuid.uuid4()),
         "event_type": EVENT_TYPE,
@@ -54,6 +57,8 @@ def build_prediction_event(response, *, transaction_type, would_decline, instanc
         "scoring_ms": round(scoring_ms, 3) if scoring_ms is not None else None,
     }
     event.update({k: response[k] for k in RESPONSE_FIELDS})
+    if feature_summary is not None:
+        event.update(feature_summary)
     return event
 
 

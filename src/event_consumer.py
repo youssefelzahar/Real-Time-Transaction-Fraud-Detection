@@ -28,6 +28,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from src.ml_monitoring import MonitoringAggregator
 from src.shutdown import stop_file_from_env, watch_stop_file
 
 log = logging.getLogger("nilepay.consumer")
@@ -59,6 +60,10 @@ class PredictionEvent(BaseModel):
     balance_source: dict[str, str]
     instance_id: Optional[int] = None
     scoring_ms: Optional[float] = None
+    # Monitoring summary (src/monitoring_features.py): optional, absent in older events.
+    feature_bins: Optional[dict[str, Optional[int]]] = None
+    feature_flags: Optional[dict[str, Optional[int]]] = None
+    non_finite_features: Optional[list[str]] = None
 
 
 class InvalidEvent(Exception):
@@ -139,11 +144,15 @@ class EventProcessor:
 
     def handle(self, value):
         """Returns "stored" or "duplicate"; raises InvalidEvent or SinkFailure."""
+        return self.process(value)[0]
+
+    def process(self, value):
+        """Like handle(), also returning the stored record (None for a duplicate)."""
         event = self.parse(value)
         event_id = str(event.event_id)
         if event_id in self._seen:
             self.counts["duplicates"] += 1
-            return "duplicate"
+            return "duplicate", None
         record = event.model_dump(mode="json")
         for attempt in range(self.max_retries + 1):
             try:
@@ -165,14 +174,15 @@ class EventProcessor:
         self.aggregates["transaction_type"][event.transaction_type or "unknown"] += 1
         self.counts["would_decline"] += event.would_decline
         self.latency_ms.append((datetime.now(timezone.utc) - event.occurred_at).total_seconds() * 1000)
-        return "stored"
+        return "stored", record
 
 
 class ConsumerRunner:
     """Poll loop: process, dead-letter, commit after durable processing."""
 
     def __init__(self, consumer, processor, dlq_producer, dlq_topic, *, commit_every=50000,
-                 commit_interval_s=5.0, metrics_path=None, metrics_interval_s=10.0, clock=time.monotonic):
+                 commit_interval_s=5.0, metrics_path=None, metrics_interval_s=10.0, clock=time.monotonic,
+                 aggregator=None):
         self.consumer = consumer
         self.processor = processor
         self.dlq_producer = dlq_producer
@@ -182,6 +192,7 @@ class ConsumerRunner:
         self.metrics_path = Path(metrics_path) if metrics_path else None
         self.metrics_interval_s = metrics_interval_s
         self.clock = clock
+        self.aggregator = aggregator   # ML monitoring (src/ml_monitoring.py), optional
         self.pending = {}          # (topic, partition) -> next offset to commit
         self.pending_count = 0
         self._last_commit = clock()
@@ -216,6 +227,9 @@ class ConsumerRunner:
         self._last_commit = self.clock()        # also paces retries while Kafka is unavailable
         if self.dlq_producer is not None and self.dlq_producer.flush(5) > 0:
             return self._commit_deferred("dead-letter topic did not acknowledge")
+        if self.aggregator is not None:
+            # Before the offset commit: a restart then skips (by offset) everything counted here.
+            self.aggregator.save()
         from confluent_kafka import KafkaException, TopicPartition
         offsets = [TopicPartition(t, p, o) for (t, p), o in self.pending.items()]
         try:
@@ -244,10 +258,16 @@ class ConsumerRunner:
                 self.counts["kafka_errors"] += 1
                 log.warning("consumer error: %s", msg.error())
             return
+        record = None
         try:
-            self.processor.handle(msg.value())
+            _, record = self.processor.process(msg.value())
         except InvalidEvent as e:
             self._dead_letter(msg, str(e))
+        if self.aggregator is not None:
+            try:   # monitoring never stops storage
+                self.aggregator.observe(record, msg.topic(), msg.partition(), msg.offset())
+            except Exception:
+                log.exception("monitoring aggregation failed")
         self.pending[(msg.topic(), msg.partition())] = msg.offset() + 1
         self.pending_count += 1
 
@@ -393,7 +413,8 @@ def main():
     runner = ConsumerRunner(consumer, processor, dlq, os.getenv("KAFKA_TOPIC_DLQ", DEFAULT_DLQ),
                             commit_every=int(os.getenv("CONSUMER_COMMIT_EVERY", "50000")),
                             commit_interval_s=float(os.getenv("CONSUMER_COMMIT_INTERVAL_S", "5")),
-                            metrics_path=Path(store_dir) / "consumer_metrics.json")
+                            metrics_path=Path(store_dir) / "consumer_metrics.json",
+                            aggregator=MonitoringAggregator(Path(store_dir) / "ml_monitoring_state.json"))
     signal.signal(signal.SIGTERM, runner.stop)
     signal.signal(signal.SIGINT, runner.stop)
     if hasattr(signal, "SIGBREAK"):           # Windows: Ctrl+Break in the consumer's own console

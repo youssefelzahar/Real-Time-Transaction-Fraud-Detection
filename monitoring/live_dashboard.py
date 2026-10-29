@@ -6,7 +6,11 @@ Read-only and separate from the API: it polls what the stack already exposes
 (Nginx stub_status, each instance's /health, /metrics/decisions, /metrics/events,
 Kafka offsets, the consumer's event store) and serves one page that refreshes every second.
 Listens on loopback only. Config (env): DASHBOARD_PORT (8090), KAFKA_BOOTSTRAP_SERVERS
-(127.0.0.1:9092), KAFKA_TOPIC_PREDICTIONS, KAFKA_CONSUMER_GROUP, EVENT_STORE_DIR.
+(127.0.0.1:9092), KAFKA_TOPIC_PREDICTIONS, KAFKA_CONSUMER_GROUP, EVENT_STORE_DIR,
+MONITORING_BASELINE_DIR (monitoring/baselines).
+
+/api/ml serves the ML monitoring section (ML_MONITORING.md) from the state the consumer saves;
+it only reads files and never touches the prediction path.
 """
 import json
 import os
@@ -18,8 +22,11 @@ from datetime import datetime
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse
+
+from src.ml_monitoring import DEFAULT_WINDOWS, load_state, monitoring_report
+from src.ml_performance import PerformanceCache
 
 ROOT = Path(__file__).resolve().parent.parent
 NGINX_CONF = ROOT / "deploy" / "nginx" / "nginx.conf"
@@ -30,6 +37,7 @@ TOPIC = os.getenv("KAFKA_TOPIC_PREDICTIONS", "nilepay.prediction-events")
 GROUP = os.getenv("KAFKA_CONSUMER_GROUP", "nilepay-prediction-monitor")
 STORE_DIR = Path(os.path.expanduser(os.getenv("EVENT_STORE_DIR", "~/.local/share/nilepay-events")))
 LEDGER_DIR = Path(os.getenv("EVENT_LEDGER_DIR") or ROOT / "deploy" / "run")
+BASELINE_DIR = Path(os.getenv("MONITORING_BASELINE_DIR") or ROOT / "monitoring" / "baselines")
 FEED_SIZE = 14
 HEARTBEAT_MAX_AGE_S = 30   # 3x the consumer's metrics_interval_s
 
@@ -162,6 +170,8 @@ class Collector:
         self.store = StoreTail(STORE_DIR)
         self.lock = threading.Lock()
         self._kafka = None
+        self.last_kafka = None      # reused by /api/ml (lag) instead of a second Kafka client
+        self.performance = PerformanceCache(STORE_DIR, model_dirs=sorted((ROOT / "models").glob("*_v*")))
 
     def _get(self, url):
         try:
@@ -188,6 +198,7 @@ class Collector:
                 "scored": (decisions or {}).get("total"),
                 "by_decision": (decisions or {}).get("by_decision"),
                 "would_decline": (decisions or {}).get("would_decline"),
+                "input_rejections": (decisions or {}).get("input_rejections"),
                 "events": events}
 
     def kafka(self):
@@ -248,6 +259,7 @@ class Collector:
             futures = [self.pool.submit(self.instance, i + 1, p) for i, p in enumerate(ports)]
             nginx = self.pool.submit(self.nginx)
             kafka = self.kafka()
+            self.last_kafka = (time.time(), kafka)
             self.store.poll()
             instances = [f.result() for f in futures]
             current_pids = {(x["events"] or {}).get("pid") for x in instances} - {None}
@@ -269,6 +281,21 @@ def page():
 @app.get("/api/snapshot")
 def snapshot():
     return collector.snapshot()
+
+
+@app.get("/api/ml")
+def ml(window: str = Query("1h", pattern="^(5m|1h|24h)$")):
+    """ML monitoring for one rolling window (prediction time), per model/policy version."""
+    lag = None
+    if collector.last_kafka and time.time() - collector.last_kafka[0] < 10 and collector.last_kafka[1].get("up"):
+        lag = collector.last_kafka[1]["lag"]
+    report = monitoring_report(load_state(STORE_DIR / "ml_monitoring_state.json"), DEFAULT_WINDOWS[window],
+                               BASELINE_DIR, lag=lag)
+    report["window"] = window
+    if report.get("available"):
+        for rep in report["series"].values():
+            rep["performance"] = collector.performance.get(rep["model_version"])
+    return report
 
 
 @app.post("/api/send/{sample}")

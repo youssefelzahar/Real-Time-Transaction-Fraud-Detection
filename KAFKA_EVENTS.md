@@ -46,6 +46,7 @@ Client ──► Nginx :8080 ──► instance 1..6 (uvicorn, FastAPI)
 - **Not published:** sender/receiver account IDs, amounts, balances. Fields come from an explicit whitelist (`RESPONSE_FIELDS`), so a new response field does not leak by default. A test checks this, and a scan of 1.6 million stored events found no such keys.
 - `event_id` (uuid4) is the deduplication key. The message key is `transaction_id` (or `event_id` if absent), so events of one transaction stay ordered on one partition.
 - `would_decline` keeps the shadow-mode signal: a `review / HIGH_RISK` event with `would_decline: true` is a transaction the policy would have declined.
+- **Monitoring summary (optional, still schema 1):** `feature_bins` (quarter-decade log bins of amount, balances and amount/type-median, `floor(4*log10(1+x))`, `null` when missing), `feature_flags` (the model's 0/1 flags) and `non_finite_features`. Exact amounts and balances are still not published; a bin only says "between 10^(b/4)-1 and 10^((b+1)/4)-1". Older events without these fields stay valid and are reported as "feature summary not available". See [ML_MONITORING.md](ML_MONITORING.md).
 
 ## Configuration (environment)
 

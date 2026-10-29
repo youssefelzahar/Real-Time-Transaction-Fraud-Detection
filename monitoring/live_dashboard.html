@@ -49,6 +49,15 @@
   pre { background: #11171d; border-radius: 8px; padding: 10px; margin: 8px 0 0; overflow: auto; max-height: 300px; font-size: 12px; }
   .muted { color: var(--muted); }
   .err { color: var(--bad); }
+  .warn { color: var(--event); }
+  .ml-head { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-bottom: 10px; }
+  .chip { background: #1b232c; border: 1px solid var(--line); border-radius: 12px; padding: 2px 10px; font-size: 12px; cursor: pointer; }
+  .chip.on { border-color: var(--req); color: var(--req); }
+  .ml-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); margin-top: 12px; }
+  .ml-grid h3 { font-size: 12px; color: var(--muted); font-weight: 500; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; }
+  .bar { height: 14px; border-radius: 3px; display: inline-block; vertical-align: middle; }
+  .na { color: var(--muted); font-style: italic; }
+  #ml table td, #ml table th { max-width: 140px; }
 </style>
 </head>
 <body>
@@ -82,6 +91,25 @@
       <pre id="sendOut">No request sent yet.</pre>
     </section>
   </div>
+  <section class="card" id="ml">
+    <h2>ML monitoring · from stored prediction events (consumer side, not in /predict)</h2>
+    <div class="ml-head">
+      <span class="muted">window (by prediction time):</span>
+      <span class="chip" data-w="5m">5 min</span><span class="chip on" data-w="1h">1 hour</span><span class="chip" data-w="24h">24 hours</span>
+      <span class="muted">model · policy:</span><span id="mlSeries"></span>
+    </div>
+    <div class="muted" id="mlFresh">loading…</div>
+    <div class="kpis" id="mlKpis" style="margin-top:10px"></div>
+    <div class="ml-grid">
+      <div><h3>Prediction volume (per bucket)</h3><svg id="mlVolume" viewBox="0 0 400 90"></svg></div>
+      <div><h3>Fraud score distribution (bars) vs training-period validation (orange ticks)</h3><svg id="mlHist" viewBox="0 0 400 140"></svg>
+        <div class="muted" id="mlScore"></div></div>
+      <div><h3>Decisions</h3><div id="mlDecisions"></div></div>
+      <div><h3>Transaction-type mix vs training baseline</h3><table id="mlTypes"></table></div>
+      <div><h3>Input data quality vs training baseline</h3><table id="mlQuality"></table></div>
+      <div><h3>Model performance (needs actual labels)</h3><div id="mlPerf"></div></div>
+    </div>
+  </section>
 </main>
 <script>
 const NS = "http://www.w3.org/2000/svg";
@@ -279,13 +307,143 @@ function render(s) {
 async function poll() {
   try {
     const r = await fetch("/api/snapshot", { cache: "no-store" });
-    render(await r.json());
+    const s = await r.json();
+    lastSnap = s;
+    render(s);
   } catch (e) {
     document.getElementById("status").innerHTML = `<span class="err">dashboard backend unreachable</span>`;
   }
   setTimeout(poll, 1000);
 }
 poll();
+
+// ---- ML monitoring (GET /api/ml every 5 s) -------------------------------------------------
+let mlWindow = "1h", mlKey = null, lastSnap = null, lastML = null;
+const pct = (r, d = 2) => r == null ? "–" : (r * 100).toFixed(d) + "%";
+const num = v => v == null ? "–" : Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(2) : (+v).toFixed(4);
+const na = t => `<span class="na">${t}</span>`;
+document.querySelectorAll("#ml .chip[data-w]").forEach(c => c.addEventListener("click", () => {
+  document.querySelectorAll("#ml .chip[data-w]").forEach(x => x.classList.toggle("on", x === c));
+  mlWindow = c.dataset.w; pollML();
+}));
+document.getElementById("mlSeries").addEventListener("click", ev => {
+  const c = ev.target.closest(".chip");
+  if (c && lastML) { mlKey = c.dataset.k; renderML(lastML); }
+});
+
+function svgBars(id, values, opts) {
+  const s = document.getElementById(id), W = 400, H = opts.h, n = values.length;
+  s.innerHTML = "";
+  if (!n) { const t = el("text", { x: 8, y: 20, fill: "#8a99a8", "font-size": 12 }, s); t.textContent = "no data in this window"; return; }
+  const scale = opts.scale || (v => v);
+  const max = Math.max(...values.map(scale), ...(opts.overlay || []).filter(v => v != null).map(scale), 1e-9), bw = W / n;
+  values.forEach((v, i) => {
+    const h = scale(v) / max * (H - 22);
+    el("rect", { x: i * bw + 0.5, y: H - 16 - h, width: Math.max(bw - 1, 1), height: h, fill: opts.color(i) }, s);
+  });
+  (opts.overlay || []).forEach((v, i) => {
+    if (v == null) return;
+    const y = H - 16 - scale(v) / max * (H - 22);
+    el("line", { x1: i * bw, x2: (i + 1) * bw, y1: y, y2: y, stroke: "#f5a524", "stroke-width": 2 }, s);
+  });
+  (opts.ticks || []).forEach(([i, label]) => {
+    el("line", { x1: i * bw, x2: i * bw, y1: 0, y2: H - 14, stroke: "#ff5d5d", "stroke-dasharray": "3 3" }, s);
+    const t = el("text", { x: i * bw - 2, y: 10, fill: "#8a99a8", "font-size": 10, "text-anchor": "end" }, s); t.textContent = label;
+  });
+  (opts.xlabels || []).forEach(([i, label]) => { const t = el("text", { x: i * bw, y: H - 3, fill: "#8a99a8", "font-size": 10 }, s); t.textContent = label; });
+}
+
+function renderML(r) {
+  lastML = r;
+  const fresh = document.getElementById("mlFresh");
+  if (!r.available) { fresh.innerHTML = na(r.reason); return; }
+  const keys = Object.keys(r.series);
+  if (!keys.includes(mlKey)) mlKey = keys[0] || null;
+  document.getElementById("mlSeries").innerHTML = keys.map(k => `<span class="chip ${k === mlKey ? "on" : ""}" data-k="${k}">${k.replace("|", " · ")} (${fmt(r.series[k].n)})</span>`).join(" ") || na("no predictions in this window");
+  const f = r.freshness;
+  const stale = f.stale === true ? `<span class="err"> · STALE: events waiting in Kafka but state not updated for ${fmt(f.state_age_s)} s</span>` : f.stale == null ? `<span class="warn"> · Kafka lag unknown</span>` : "";
+  const gaps = r.counters.offset_gap_not_aggregated ? `<span class="warn"> · ${fmt(r.counters.offset_gap_not_aggregated)} events not aggregated (state lost or behind)</span>` : "";
+  fresh.innerHTML = `state saved ${f.state_age_s == null ? "never" : fmt(f.state_age_s) + " s ago"} · newest prediction ${f.newest_prediction_age_s == null ? "–" : fmt(f.newest_prediction_age_s) + " s ago"} · Kafka lag ${f.kafka_lag == null ? "–" : fmt(f.kafka_lag)} · resolution ${r.resolution} · cumulative since ${r.cumulative_since}${stale}${gaps}`;
+  const x = mlKey && r.series[mlKey];
+  const kp = document.getElementById("mlKpis");
+  if (!x) {
+    kp.innerHTML = "";
+    ["mlDecisions", "mlTypes", "mlQuality", "mlPerf", "mlScore"].forEach(id => document.getElementById(id).innerHTML = na("no predictions in this window"));
+    svgBars("mlVolume", [], { h: 90 }); svgBars("mlHist", [], { h: 140 });
+    return;
+  }
+  const low = x.insufficient_data ? ` <span class="warn">· only ${x.n} predictions (&lt; ${x.min_events}): insufficient data, rates are not meaningful</span>` : "";
+  const q = x.quality, snap = lastSnap || { instances: [] };
+  const rej = snap.instances.reduce((a, i) => a + ((i.input_rejections || {}).total || 0), 0);
+  const notDelivered = snap.instances.reduce((a, i) => a + (i.events && i.events.kafka_enabled ? notSent(i.events) + Object.values(i.events.failed || {}).reduce((p, v) => p + v, 0) : 0), 0);
+  const cons = snap.consumer || {};
+  const k = [
+    [`predictions · last ${r.window}`, fmt(x.n) + (x.insufficient_data ? " ⚠" : "")],
+    ["approve rate", pct(x.decisions.approve.rate)],
+    ["review rate (incl. shadow)", pct(x.decisions.review.rate)],
+    ["actual declines", `${fmt(x.actual_declines.n)} (${pct(x.actual_declines.rate)})`],
+    ["shadow would-decline · NOT executed", `${fmt(x.shadow_would_decline.n)} (${pct(x.shadow_would_decline.rate, 3)})`],
+    ["mean fraud score", num(x.score.mean)],
+    ["p95 / p99 score (approx.)", `${num(x.score.p95)} / ${num(x.score.p99)}`],
+    ["events with missing features", pct(q.events_with_missing_features.rate)],
+    ["non-finite inputs", q.feature_summary_available.n ? pct(q.events_with_non_finite.rate) : "n/a"],
+    ["unknown transaction type", pct(q.unknown_type.rate)],
+    ["amount above training p99.9", q.unexpected_amount ? pct(q.unexpected_amount.rate) : "n/a"],
+    ["events with feature summary", pct(q.feature_summary_available.rate, 0)],
+    ["requests rejected (422) · current processes", fmt(rej)],
+    ["events not delivered · current processes", fmt(notDelivered)],
+    ["dead-lettered · consumer process", fmt(cons.dead_lettered)],
+  ];
+  kp.innerHTML = k.map(([l, v]) => `<div class="kpi"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+
+  const vol = x.volume_per_bucket;
+  svgBars("mlVolume", vol.map(v => v[1]), { h: 90, color: () => "var(--req)",
+    xlabels: vol.length ? [[0, vol[0][0].slice(11, 16)], [Math.max(vol.length - 2, 1), vol.at(-1)[0].slice(11, 16)]] : [] });
+  const edges = x.score.edges, total = x.score.hist.reduce((a, b) => a + b, 0) || 1;
+  const thr = [[edges.indexOf(0.54), "approve 0.54"], [edges.indexOf(0.999), "decline 0.999"]].filter(t => t[0] >= 0);
+  svgBars("mlHist", x.score.hist.map(v => v / total), { h: 140, scale: v => Math.sqrt(v),
+    color: i => edges[i] >= 0.999 ? "var(--bad)" : edges[i] >= 0.54 ? "var(--review)" : "var(--resp)",
+    ticks: thr, overlay: x.score.baseline_hist_share || [],
+    xlabels: [[0, "0"], [edges.indexOf(0.1), "0.1"], [edges.indexOf(0.5), "0.5"], [edges.length - 2, "1"]] });
+  document.getElementById("mlScore").innerHTML = `p50 ${num(x.score.p50)} · p90 ${num(x.score.p90)} · p95 ${num(x.score.p95)} · p99 ${num(x.score.p99)} (from fixed bins, error ≤ 1 bin) · bar height = √share · x axis = bin index, finer near 0 and 1${low}`;
+
+  const ref = x.baseline_reference || {}, dr = ref.decision_rates || {};
+  document.getElementById("mlDecisions").innerHTML = ["approve", "review", "decline"].map(d =>
+    `<div style="margin:3px 0"><span class="pill ${d}" style="display:inline-block;width:70px">${d}</span> <span class="bar ${d}" style="width:${Math.max((x.decisions[d].rate || 0) * 200, x.decisions[d].n ? 2 : 0)}px"></span> ${fmt(x.decisions[d].n)} (${pct(x.decisions[d].rate)}) <span class="muted">· validation ref ${pct(dr[d])}</span></div>`).join("")
+    + `<div style="margin-top:6px">shadow would-decline: <b>${fmt(x.shadow_would_decline.n)}</b> (${pct(x.shadow_would_decline.rate, 3)}) <span class="muted">· returned to the client as review; the decline was NOT executed · validation ref ${pct(ref.would_decline_rate, 3)}</span></div>`
+    + `<div class="muted">reasons: ${Object.entries(x.reasons).map(([k, v]) => `${k} ${fmt(v)}`).join(" · ") || "–"}</div>`
+    + `<div class="muted">baseline: ${x.baseline_version || x.baseline_status}${ref.policy_version ? " · reference policy " + ref.policy_version : ""}</div>`;
+
+  const tv = x.types_vs_baseline;
+  document.getElementById("mlTypes").innerHTML = `<tr><th>type</th><th>n</th><th>share</th><th>training</th><th>diff</th></tr>` +
+    Object.entries(x.types).filter(([t, v]) => v.n || t !== "__unknown__").map(([t, v]) =>
+      `<tr><td>${t}</td><td>${fmt(v.n)}</td><td>${pct(v.share, 1)}</td><td>${tv ? pct(tv.baseline_share[t], 1) : "–"}</td><td>${tv && tv.share_diff && t in tv.share_diff ? (tv.share_diff[t] * 100).toFixed(1) + " pp" : "–"}</td></tr>`).join("") +
+    `<tr><td colspan="5" class="muted">total variation distance ${tv && tv.tvd != null ? tv.tvd.toFixed(3) : "–"} (0 = same mix, 1 = disjoint) · descriptive, not a drift test</td></tr>`;
+
+  const fr = x.feature_ranges || {};
+  const feats = [...new Set([...Object.keys(fr), ...Object.keys(q.missing_by_feature)])];
+  document.getElementById("mlQuality").innerHTML = `<tr><th>feature</th><th>missing</th><th>train missing</th><th>outside train range</th><th>&gt; train p99.9</th></tr>` +
+    (feats.map(f => { const m = q.missing_by_feature[f], g = fr[f] || {};
+      return `<tr><td>${f}</td><td>${pct(m ? m.rate : 0)}</td><td>${pct((x.baseline_missing_by_feature || {})[f])}</td><td>${g.outside_training_range ? pct(g.outside_training_range.rate) : "–"}</td><td>${g.above_training_p99_9 ? pct(g.above_training_p99_9.rate) : "–"}</td></tr>`; }).join("")
+      || `<tr><td colspan="5">${na("no feature summary in these events (events from before this change)")}</td></tr>`) +
+    `<tr><td colspan="5" class="muted">non-finite: ${q.feature_summary_available.n ? fmt(q.events_with_non_finite.n) : "n/a"} · unknown type: ${fmt(q.unknown_type.n)} · missing = NaN given to the model</td></tr>`;
+
+  const p = x.performance || {}, pc = p.counts || {};
+  const mt = p.at_approve_threshold;
+  document.getElementById("mlPerf").innerHTML = p.status === "ok"
+    ? `<table><tr><th></th><th>approve thr.</th><th>decline thr. (incl. shadow)</th></tr>` +
+      ["precision", "recall", "f1", "fpr", "false_negatives", "cost"].map(m => `<tr><td>${m}</td><td>${num(mt[m])}</td><td>${num(p.at_decline_threshold_incl_shadow[m])}</td></tr>`).join("") +
+      `<tr><td>PR-AUC</td><td colspan="2">${num(p.pr_auc)}</td></tr></table><div class="muted">${fmt(p.n)} labeled predictions · coverage ${pct(pc.label_coverage)} · cost = 100·FN + FP</div>`
+    : `<div class="${p.status === "insufficient_labels" ? "warn" : "na"}">${p.status === "insufficient_labels" ? "Insufficient labels" : "Unavailable"}: ${p.reason || "–"}</div>
+       <div class="muted" style="margin-top:6px">Precision, recall, F1, PR-AUC, FPR, false negatives and cost (100·FN + FP) are computed only from actual fraud labels joined by transaction_id. Unlabeled predictions are never counted as legitimate.</div>
+       <div class="muted">labels ingested ${fmt(pc.label_records || 0)} · labeled predictions ${fmt(pc.labeled_predictions || 0)}</div>`;
+}
+
+async function pollML() {
+  try { renderML(await (await fetch("/api/ml?window=" + mlWindow, { cache: "no-store" })).json()); }
+  catch (e) { document.getElementById("mlFresh").innerHTML = `<span class="err">ML monitoring unavailable: ${e}</span>`; }
+}
+(function loopML() { pollML(); setTimeout(loopML, 5000); })();
 
 document.querySelectorAll("button[data-s]").forEach(b => b.addEventListener("click", async () => {
   const out = document.getElementById("sendOut");

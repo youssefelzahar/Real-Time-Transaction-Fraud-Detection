@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Annotated, Literal, Optional, Protocol
 
 from fastapi import Body, FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.decision_engine import DEFAULT_POLICY_PATH, DecisionEngine, DecisionPolicy
 from src.events import KafkaEventPublisher, ProducerLedger, build_prediction_event
+from src.monitoring_features import feature_summary
 from src.predict import TIMING_LOG, FraudPredictor
 from src.shutdown import stop_file_from_env, watch_stop_file
 from time import perf_counter
@@ -174,12 +177,32 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NilePay Fraud Scoring", lifespan=lifespan)
 
+# /predict requests rejected by input validation (HTTP 422), by first failing field. These never
+# reach the model, so they are not in any prediction event. Per process, reset on restart.
+# Low cardinality: only TransactionRequest field names (or "body"/"other") are used as keys.
+INPUT_REJECTION_FIELDS = set(TransactionRequest.model_fields) | {"body"}
+input_rejections = {"total": 0, "by_field": {}}
+
+
+@app.exception_handler(RequestValidationError)
+async def count_rejected_input(request: Request, exc: RequestValidationError):
+    if request.url.path == "/predict":
+        input_rejections["total"] += 1
+        fields = {str(err["loc"][1]) if len(err["loc"]) > 1 and err["loc"][0] == "body" else str(err["loc"][0])
+                  for err in exc.errors()} or {"other"}
+        for field in fields:
+            key = field if field in INPUT_REJECTION_FIELDS else "other"
+            input_rejections["by_field"][key] = input_rejections["by_field"].get(key, 0) + 1
+    return await request_validation_exception_handler(request, exc)
+
 
 @app.get("/metrics/decisions", include_in_schema=False)
 def decision_metrics(request: Request):
     """Internal: decision counters for this instance (blocked on the public Nginx port)."""
     return {**request.app.state.decision_engine.metrics.snapshot(),
-            "model_version": request.app.state.predictor.model_version}
+            "model_version": request.app.state.predictor.model_version,
+            "input_rejections": {"total": input_rejections["total"],
+                                 "by_field": dict(input_rejections["by_field"])}}
 
 
 @app.get("/metrics/events", include_in_schema=False)
@@ -265,18 +288,28 @@ async def predict(
             "receiver": receiver_source,
         },
     )
-    publish_event(request.app.state.event_publisher, response, tx.type, decision.would_decline, model_ms)
+    publish_event(request.app.state.event_publisher, response, tx.type, decision.would_decline, model_ms,
+                  predictor=predictor, record=record)
     return response
 
 
-def publish_event(publisher, response, transaction_type, would_decline, scoring_ms):
+def publish_event(publisher, response, transaction_type, would_decline, scoring_ms, predictor=None, record=None):
     """Hand the event to the publisher (non-blocking enqueue). Event publishing must
-    never change or fail the prediction response."""
+    never change or fail the prediction response.
+
+    The monitoring summary (log bins + model flags, no exact amounts) is rebuilt with the same
+    pipeline.transform_one the predictor used (~10 us), so predictor.score() keeps its contract."""
     if not publisher.enabled:
         return
     try:
+        summary = None
+        if predictor is not None and record is not None:
+            try:
+                summary = feature_summary(predictor.pipeline.transform_one(record), predictor.feature_names)
+            except Exception:   # monitoring detail: the event still goes out, marked "not available"
+                log.exception("could not build the monitoring feature summary")
         publisher.publish(build_prediction_event(
             response.model_dump(), transaction_type=transaction_type, would_decline=would_decline,
-            instance_id=INSTANCE_ID, scoring_ms=scoring_ms))
+            instance_id=INSTANCE_ID, scoring_ms=scoring_ms, feature_summary=summary))
     except Exception:
         log.exception("could not build or publish prediction event")

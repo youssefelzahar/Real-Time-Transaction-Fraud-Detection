@@ -221,6 +221,10 @@ Earlier two-instance run (A/B, each on its own physical core, Nginx on a third):
 
 Optional: with `KAFKA_BOOTSTRAP_SERVERS` set, each instance also publishes every prediction (no account IDs, amounts or balances) to the Kafka topic `nilepay.prediction-events`, without blocking the request. A separate consumer (`python -m src.event_consumer`) validates, deduplicates and stores the events, and dead-letters invalid ones. Delivery is at-least-once while the broker is reachable within 30 s; otherwise best-effort, with every lost event counted. The broker runs natively (`deploy/kafka.sh`). Architecture, failure behavior, measurements and limits: **[KAFKA_EVENTS.md](KAFKA_EVENTS.md)**.
 
+### ML monitoring
+
+The consumer also aggregates prediction behaviour and input data quality (rolling 5 min / 1 h / 24 h windows, per model and policy version) and compares them with a versioned baseline built from the model's training data; the live dashboard shows it. Model performance (precision, recall, PR-AUC, cost) is computed only from actual labels, and none exist yet. **[ML_MONITORING.md](ML_MONITORING.md)**.
+
 ### Limitations
 
 - **Six instances on one machine do not protect against machine-level failure.** Power, kernel, disk, network or memory failure on this host takes down all six instances and Nginx together. There's no real high availability, and nothing here supports a 99.9% availability claim.
