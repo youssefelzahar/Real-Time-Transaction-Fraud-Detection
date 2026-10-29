@@ -150,6 +150,18 @@ deploy/stop.sh
 
 Expected: a few dozen failed requests at most (in flight on instance 3 when it stopped), then the other five serve everything, then all six again.
 
+### Automated high-traffic test (capacity, throughput, availability)
+
+```bash
+python -m monitoring.live_dashboard &      # optional: watch it at http://127.0.0.1:8090
+tests/stress_suite.sh                      # ~5 min; report in deploy/run/stress-<time>.txt
+PHASES="ramp" tests/stress_suite.sh        # only the capacity ramp (also: sustain, avail)
+```
+
+1. **Ramp:** 25 to 800 connections, 15 s each. It reports throughput, successful req/s, p50/p95/p99 and errors, plus the highest load that stays within p95 < 100 ms with 0 errors. 503 above ~384 connections is Nginx load shedding (6 × `max_conns=64`).
+2. **Sustain:** 60 s at that load, with per-second min/median/max.
+3. **Avail:** the same load for 75 s. Instance 3 is stopped at +10 s and restarted at +25 s; the Kafka broker is stopped at +40 s and restarted at +50 s. It reports availability, the seconds that had errors, and Kafka events delivered or lost.
+
 ## 8. Decision policy and metrics
 
 ```bash
@@ -159,6 +171,35 @@ python tests/decision_metrics.py                                  # all six inst
 ```
 
 `/metrics/decisions` is internal: it answers on each instance (`:8001`–`:8006`) and returns 404 through Nginx (`:8080`). See [DECISION_POLICY.md](DECISION_POLICY.md) for the policy, its evidence, and how to switch decline from shadow to enforce.
+
+## 8b. Prediction events on Kafka (optional)
+
+```bash
+sudo apt install openjdk-21-jre-headless       # once
+deploy/kafka.sh install                         # once: Kafka 4.0.0 into ~/.local/nilepay-kafka
+deploy/kafka.sh start                           # broker on 127.0.0.1:9092 + topics
+export KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092
+deploy/start.sh consumer                        # event consumer (log: deploy/run/consumer.log)
+MODEL_DIR=models/e7_v2 deploy/start.sh          # instances publish events while the variable is set
+
+deploy/kafka.sh status                          # topics + consumer lag
+curl -s localhost:8001/metrics/events | python3 -m json.tool
+RUN_KAFKA_TESTS=1 pytest tests/test_kafka_integration.py
+
+deploy/stop.sh; deploy/stop.sh consumer; deploy/kafka.sh stop
+```
+
+Without `KAFKA_BOOTSTRAP_SERVERS` the API runs exactly as before. Details: [KAFKA_EVENTS.md](KAFKA_EVENTS.md).
+
+### Live view (see requests and events moving)
+
+```bash
+python -m monitoring.live_dashboard            # open http://127.0.0.1:8090
+# in another terminal, from the project root: a slow, steady load you can watch
+wrk -t2 -c8 -d120s -s tests/wrk_paced.lua http://127.0.0.1:8080 -- 20
+```
+
+It shows client → Nginx → 6 instances → Kafka → consumer → event store with live rates, instances or broker going down (red dashed), Kafka lag, decision totals, the latest stored events, and buttons that send one sample transaction through Nginx. It only reads existing metrics and listens on 127.0.0.1.
 
 ## 9. Benchmark only the scoring code
 

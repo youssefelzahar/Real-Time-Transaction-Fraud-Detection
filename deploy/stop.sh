@@ -3,6 +3,7 @@
 #   deploy/stop.sh             # Nginx, then every instance
 #   deploy/stop.sh 3           # only instance 3 (failure testing)
 #   deploy/stop.sh nginx
+#   deploy/stop.sh consumer    # Kafka event consumer (SIGTERM: commits processed events, then exits)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,6 +35,7 @@ stop_nginx() {
 
 case "${1:-all}" in
     nginx) stop_nginx ;;
+    consumer) stop_pidfile "$RUN/consumer.pid" "consumer" ;;
     all)   stop_nginx
            shopt -s nullglob
            for f in "$RUN"/instance_*.pid; do
@@ -42,6 +44,6 @@ case "${1:-all}" in
     *)     if [[ "$1" =~ ^[0-9]+$ ]]; then
                stop_pidfile "$RUN/instance_$1.pid" "instance $1"
            else
-               echo "usage: $0 [all|nginx|<instance number>]" >&2; exit 2
+               echo "usage: $0 [all|nginx|consumer|<instance number>]" >&2; exit 2
            fi ;;
 esac

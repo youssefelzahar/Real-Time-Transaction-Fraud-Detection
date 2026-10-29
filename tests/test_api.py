@@ -20,7 +20,7 @@ def make_client(model_dir, decision_policy):
 
 
 def reset_state():
-    for name in ("predictor", "account_service", "decision_engine"):
+    for name in ("predictor", "account_service", "decision_engine", "event_publisher"):
         if hasattr(app.state, name):
             delattr(app.state, name)
 
@@ -175,3 +175,101 @@ def test_swagger_examples_are_valid_requests(client):
     schema = client.get("/openapi.json").json()
     body = schema["paths"]["/predict"]["post"]["requestBody"]["content"]["application/json"]
     assert set(body["examples"]) == set(EXAMPLES)
+
+
+# --- Kafka prediction events (publisher is mocked; see tests/test_events.py) ------------
+
+class RecordingPublisher:
+    enabled = True
+
+    def __init__(self, error=None):
+        self.events, self.error = [], error
+
+    def publish(self, event):
+        if self.error:
+            raise self.error
+        self.events.append(event)
+        return True
+
+    def snapshot(self):
+        return {"kafka_enabled": True, "enqueued": len(self.events)}
+
+    def close(self):
+        pass
+
+
+@pytest.fixture
+def events_client(model_dir):
+    """Client with a recording publisher attached; yields (client, publisher)."""
+    publisher = RecordingPublisher()
+    app.state.event_publisher = publisher
+    with make_client(model_dir, policy()) as c:
+        yield c, publisher
+    reset_state()
+
+
+def test_kafka_disabled_by_default(client):
+    assert client.get("/metrics/events").json() == {"kafka_enabled": False}
+    assert client.post("/predict", json=payload()).status_code == 200
+
+
+@pytest.mark.parametrize("score, decision, reason, would_decline", [
+    (0.10, "approve", "LOW_RISK", False),
+    (0.80, "review", "REVIEW_THRESHOLD", False),
+    (0.9995, "review", "HIGH_RISK", True),          # shadow mode unchanged by publishing
+])
+def test_event_published_and_response_unchanged(events_client, monkeypatch, score, decision, reason, would_decline):
+    client, publisher = events_client
+    monkeypatch.setattr(app.state.predictor, "score", fixed_score(score))
+    body = client.post("/predict", json=payload()).json()
+    assert set(body) == RESPONSE_FIELDS
+    assert (body["decision"], body["reason_code"]) == (decision, reason)
+    (event,) = publisher.events
+    for k in ("transaction_id", "fraud_probability", "decision", "reason_code", "threshold",
+              "decision_policy_version", "model_version", "missing_features", "balance_source"):
+        assert event[k] == body[k]
+    assert event["would_decline"] is would_decline and event["transaction_type"] == "TRANSFER"
+    assert "sender_id" not in event and "amount" not in event
+
+
+def test_publisher_failure_never_breaks_prediction(model_dir):
+    app.state.event_publisher = RecordingPublisher(error=RuntimeError("kafka client exploded"))
+    with make_client(model_dir, policy()) as c:
+        r = c.post("/predict", json=payload())
+    reset_state()
+    assert r.status_code == 200 and set(r.json()) == RESPONSE_FIELDS
+
+
+def test_prediction_does_not_wait_for_delivery(model_dir):
+    """Broker never acknowledges: the request still returns at once; the event stays in flight."""
+    from tests.test_events import FakeProducer
+    from src.events import KafkaEventPublisher
+    pub = KafkaEventPublisher({"queue.buffering.max.messages": 10}, producer=FakeProducer(outcome="stuck"),
+                              shutdown_flush_s=0.05, poll_interval_s=0.01)
+    app.state.event_publisher = pub
+    with make_client(model_dir, policy()) as c:
+        r = c.post("/predict", json=payload())
+        m = c.get("/metrics/events").json()
+    reset_state()
+    assert r.status_code == 200
+    assert m["enqueued"] == 1 and m["delivered"] == 0 and m["in_flight"] == 1
+
+
+def test_buffer_full_still_returns_predictions(model_dir):
+    from tests.test_events import FakeProducer
+    from src.events import KafkaEventPublisher
+    pub = KafkaEventPublisher({"queue.buffering.max.messages": 2}, producer=FakeProducer(outcome="stuck", capacity=2),
+                              shutdown_flush_s=0.05, poll_interval_s=0.01)
+    app.state.event_publisher = pub
+    with make_client(model_dir, policy()) as c:
+        statuses = [c.post("/predict", json=payload()).status_code for _ in range(5)]
+        m = c.get("/metrics/events").json()
+    reset_state()
+    assert statuses == [200] * 5
+    assert m["enqueued"] == 2 and m["buffer_full_drops"] == 3 and m["queue_utilization"] == 1.0
+    assert pub.lost_on_shutdown == 2                    # counted when the app shut down
+
+
+def test_event_metrics_endpoint_hidden_from_openapi(events_client):
+    client, _ = events_client
+    assert "/metrics/events" not in client.get("/openapi.json").json()["paths"]

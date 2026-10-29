@@ -23,10 +23,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.decision_engine import DEFAULT_POLICY_PATH, DecisionEngine, DecisionPolicy
+from src.events import KafkaEventPublisher, build_prediction_event
 from src.predict import TIMING_LOG, FraudPredictor
 from time import perf_counter
 
 log = logging.getLogger("nilepay.api")
+
+# Set per instance by deploy/start.sh (1..6); low-cardinality label for events.
+INSTANCE_ID = int(os.environ["INSTANCE_ID"]) if os.getenv("INSTANCE_ID", "").isdigit() else None
 
 class AccountService(Protocol):
     def get_balance(self, account_id: str) -> Optional[float]:
@@ -141,7 +145,11 @@ async def lifespan(app: FastAPI):
         app.state.decision_engine = DecisionEngine(policy)
     # Refuse to start with thresholds that were not validated for this model.
     app.state.decision_engine.policy.check_model(app.state.predictor.model_version)
+    if not hasattr(app.state, "event_publisher"):
+        # NullPublisher unless KAFKA_BOOTSTRAP_SERVERS is set. Does not need a reachable broker.
+        app.state.event_publisher = KafkaEventPublisher.from_env(client_id=f"nilepay-api-{INSTANCE_ID or 'dev'}")
     yield
+    app.state.event_publisher.close()   # bounded flush; leftovers counted as lost_on_shutdown
 
 
 app = FastAPI(title="NilePay Fraud Scoring", lifespan=lifespan)
@@ -152,6 +160,12 @@ def decision_metrics(request: Request):
     """Internal: decision counters for this instance (blocked on the public Nginx port)."""
     return {**request.app.state.decision_engine.metrics.snapshot(),
             "model_version": request.app.state.predictor.model_version}
+
+
+@app.get("/metrics/events", include_in_schema=False)
+def event_metrics(request: Request):
+    """Internal: Kafka event publishing counters for this instance."""
+    return request.app.state.event_publisher.snapshot()
 
 
 @app.get("/health")
@@ -219,7 +233,7 @@ async def predict(
             "total_ms": round(total_ms, 3),
         })
 
-    return ScoreResponse(
+    response = ScoreResponse(
         transaction_id=tx.transaction_id,
         **result,
         decision=decision.decision,
@@ -231,3 +245,18 @@ async def predict(
             "receiver": receiver_source,
         },
     )
+    publish_event(request.app.state.event_publisher, response, tx.type, decision.would_decline, model_ms)
+    return response
+
+
+def publish_event(publisher, response, transaction_type, would_decline, scoring_ms):
+    """Hand the event to the publisher (non-blocking enqueue). Event publishing must
+    never change or fail the prediction response."""
+    if not publisher.enabled:
+        return
+    try:
+        publisher.publish(build_prediction_event(
+            response.model_dump(), transaction_type=transaction_type, would_decline=would_decline,
+            instance_id=INSTANCE_ID, scoring_ms=scoring_ms))
+    except Exception:
+        log.exception("could not build or publish prediction event")

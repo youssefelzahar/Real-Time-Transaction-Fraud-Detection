@@ -5,11 +5,14 @@
 #   deploy/start.sh            # every instance, then Nginx
 #   deploy/start.sh 3          # only instance 3 (e.g. restart after a failure)
 #   deploy/start.sh nginx
+#   deploy/start.sh consumer   # Kafka event consumer (needs KAFKA_BOOTSTRAP_SERVERS; not part of `all`)
 # Config (env): MODEL_DIR (default models/e7_v1), WORKERS_PER_INSTANCE (default 1),
 #   ACCOUNT_SNAPSHOT, LOG_LEVEL (default warning; `info` logs every request),
 #   TIMING_LOG (default 0; 1 prints timings), DECISION_POLICY (default config/decision_policy.json),
 #   CPUS_INSTANCES (taskset CPU list for all instances, e.g. 0-7; or one list per
-#   instance separated by spaces, e.g. "0 1 2 3 4 5"), CPUS_NGINX. Empty = no pinning.
+#   instance separated by spaces, e.g. "0 1 2 3 4 5"), CPUS_NGINX, CPUS_CONSUMER. Empty = no pinning.
+#   KAFKA_BOOTSTRAP_SERVERS (unset = no event publishing) and the other KAFKA_* settings
+#   in KAFKA_EVENTS.md are passed through to the instances and the consumer.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -53,7 +56,7 @@ launch_instance() {  # launch_instance <n>  (does not wait)
     if running "$RUN/instance_$n.pid"; then echo "  instance $n already running"; return 0; fi
     # Launched directly (no wrapper function/subshell) so $! is the uvicorn process
     # itself (taskset execs in place); stop.sh relies on that PID.
-    $(pin_prefix "$(cpus_for "$n")") "$PYTHON" -m uvicorn api.main:app --host 127.0.0.1 --port "$port" \
+    INSTANCE_ID="$n" $(pin_prefix "$(cpus_for "$n")") "$PYTHON" -m uvicorn api.main:app --host 127.0.0.1 --port "$port" \
         --workers "$WORKERS" --log-level "$LOG_LEVEL" >> "$RUN/instance_$n.log" 2>&1 &
     echo $! > "$RUN/instance_$n.pid"
 }
@@ -70,13 +73,24 @@ start_nginx() {
     wait_for "http://127.0.0.1:8080/health" "nginx (:8080)"
 }
 
+start_consumer() {
+    [[ -n "${KAFKA_BOOTSTRAP_SERVERS:-}" ]] || { echo "  set KAFKA_BOOTSTRAP_SERVERS (e.g. 127.0.0.1:9092)" >&2; return 1; }
+    if running "$RUN/consumer.pid"; then echo "  consumer already running"; return 0; fi
+    $(pin_prefix "${CPUS_CONSUMER:-}") "$PYTHON" -m src.event_consumer >> "$RUN/consumer.log" 2>&1 &
+    echo $! > "$RUN/consumer.pid"
+    sleep 2
+    running "$RUN/consumer.pid" && echo "  consumer running (log: deploy/run/consumer.log)" \
+        || { echo "  consumer exited, see deploy/run/consumer.log" >&2; return 1; }
+}
+
 case "${1:-all}" in
     nginx) start_nginx ;;
+    consumer) start_consumer ;;
     all)   start_instances $(seq "${#PORTS[@]}")
            start_nginx ;;
     *)     if [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= ${#PORTS[@]} )); then
                start_instances "$1"
            else
-               echo "usage: $0 [all|nginx|1..${#PORTS[@]}]" >&2; exit 2
+               echo "usage: $0 [all|nginx|consumer|1..${#PORTS[@]}]" >&2; exit 2
            fi ;;
 esac

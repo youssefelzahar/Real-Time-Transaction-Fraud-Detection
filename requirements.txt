@@ -8,3 +8,4 @@ uvicorn[standard]  # uvloop + httptools; plain asyncio loses TCP_NODELAY with --
 xgboost
 pytest
 httpx
+confluent-kafka
