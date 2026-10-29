@@ -1,12 +1,21 @@
 """Prediction events published to Kafka, off the request's critical path.
 
-Delivery is best-effort with every loss counted (see KAFKA_EVENTS.md):
+Delivery is at-most-once from the API, best-effort, with every outcome counted (see KAFKA_EVENTS.md):
   - publish() only serializes the event and appends it to librdkafka's bounded
     in-memory queue (~microseconds). It never waits for the broker and never raises.
   - librdkafka's own threads batch, send, reconnect and retry for up to
     KAFKA_MESSAGE_TIMEOUT_MS; a daemon thread here fires delivery callbacks.
   - A full queue, a serialization error or a delivery failure is counted, not hidden.
 Kafka is off unless KAFKA_BOOTSTRAP_SERVERS is set (NullPublisher).
+
+Counter evidence (what each one proves):
+  - delivered: the broker acknowledged the event (acks=all).
+  - buffer_full_drops / serialization_errors / produce_errors: never handed to Kafka -> not sent.
+  - failed.*: the client reported a delivery failure. For `timed_out` with the idempotent producer
+    the event may still have been written (ack lost), so it is "not confirmed", not proven lost.
+  - unconfirmed_at_shutdown: still pending when the bounded shutdown flush ended -> outcome unknown.
+All counters cover the current process only (reset on restart). ProducerLedger keeps a per-process
+start/stop record so totals across restarts can be summed exactly once per process.
 
 Thread safety: counters written in publish() are only written by the request thread;
 counters written in _on_delivery() are only written by the poll thread (or by flush()
@@ -16,6 +25,7 @@ import json
 import logging
 import os
 import threading
+from pathlib import Path
 import time
 import uuid
 from datetime import datetime, timezone
@@ -112,7 +122,10 @@ class KafkaEventPublisher:
         self.failed = {"timed_out": 0, "broker_unavailable": 0, "other": 0}
         self.last_error = None
         self.last_error_at = None
-        self.lost_on_shutdown = 0
+        self.unconfirmed_at_shutdown = 0
+        self.closed = False
+        self.pid = os.getpid()
+        self.process_started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
         self._stop = threading.Event()
         self._poll_interval_s = poll_interval_s
@@ -185,20 +198,76 @@ class KafkaEventPublisher:
             "buffer_full_drops": self.buffer_full_drops,
             "serialization_errors": self.serialization_errors,
             "produce_errors": self.produce_errors,
-            "lost_on_shutdown": self.lost_on_shutdown,
+            "unconfirmed_at_shutdown": self.unconfirmed_at_shutdown,
             "in_flight": in_flight,
             "queue_capacity": self.capacity,
             "queue_utilization": round(in_flight / self.capacity, 4) if self.capacity else 0.0,
             "last_error": self.last_error,
             "last_error_at": self.last_error_at,
+            "counter_scope": "process",          # reset when this instance restarts
+            "pid": self.pid,
+            "process_started_at": self.process_started_at,
         }
 
     def close(self):
         """Stop the poll thread, give pending events a bounded flush, count what is left."""
+        if self.closed:
+            return
         self._stop.set()
         self._thread.join(timeout=2)
-        remaining = self._producer.flush(self.shutdown_flush_s)
-        self.lost_on_shutdown = remaining
+        pending = len(self._producer)
+        started = time.monotonic()
+        remaining = self._producer.flush(self.shutdown_flush_s)   # also fires the delivery callbacks
+        self.unconfirmed_at_shutdown = remaining
+        self.closed = True
         if remaining:
-            log.warning("shutdown: %d prediction events still undelivered after %.1fs flush; counted as lost",
-                        remaining, self.shutdown_flush_s)
+            log.warning("shutdown: %d of %d pending prediction events not confirmed after %.1fs flush "
+                        "(outcome unknown, counted as unconfirmed_at_shutdown)", remaining, pending,
+                        self.shutdown_flush_s)
+        elif pending:
+            log.info("shutdown: flushed %d pending prediction events in %.2fs", pending, time.monotonic() - started)
+
+
+class ProducerLedger:
+    """Append-only JSONL record of each API process's producer counters: a `start` line when the
+    process starts and a `stop` line with its final counters after the shutdown flush.
+
+    One file per instance (single writer, no cross-process append races). A start without a
+    matching stop means the process ended without accounting (force-killed or crashed): its
+    counts are unknown, never assumed lost. Enabled by EVENT_LEDGER_DIR; off otherwise.
+    """
+
+    def __init__(self, path, instance_id):
+        self.path = Path(path)
+        self.instance_id = instance_id
+        self.pid = os.getpid()
+
+    @classmethod
+    def from_env(cls, instance_id):
+        directory = os.getenv("EVENT_LEDGER_DIR")
+        if not directory:
+            return None
+        return cls(Path(directory) / f"producer-ledger-instance-{instance_id or 'dev'}.jsonl", instance_id)
+
+    def _append(self, record):
+        record = {"instance_id": self.instance_id, "pid": self.pid,
+                  "at": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record}
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, separators=(",", ":")) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+        except OSError as e:   # accounting must never break serving or shutdown
+            log.warning("producer ledger not written (%s): %s", self.path, e)
+
+    def record_start(self, publisher):
+        self._append({"record": "start", "kafka_enabled": publisher.enabled})
+
+    def record_stop(self, publisher, shutdown_s=None):
+        snap = publisher.snapshot()
+        keep = ("enqueued", "delivered", "failed", "buffer_full_drops", "serialization_errors", "produce_errors",
+                "unconfirmed_at_shutdown", "process_started_at")
+        self._append({"record": "stop", "kafka_enabled": publisher.enabled,
+                      "shutdown_s": None if shutdown_s is None else round(shutdown_s, 3),
+                      **{k: snap[k] for k in keep if k in snap}})

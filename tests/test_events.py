@@ -165,13 +165,13 @@ def test_unexpected_produce_error_never_raises():
     pub.close()
 
 
-def test_shutdown_with_pending_events_counts_them_as_lost():
+def test_shutdown_with_pending_events_counts_them_as_unconfirmed():
     pub = publisher(FakeProducer(outcome="stuck"))
     for _ in range(7):
         pub.publish(event())
     start = time.monotonic()
     pub.close()
-    assert pub.lost_on_shutdown == 7
+    assert pub.unconfirmed_at_shutdown == 7
     assert time.monotonic() - start < 3          # bounded: poll thread joins, flush is time-limited
 
 
@@ -182,7 +182,7 @@ def test_shutdown_flushes_deliverable_events():
         pub.publish(event())
     prod.outcome = None                            # broker back just before shutdown
     pub.close()
-    assert pub.lost_on_shutdown == 0 and pub.delivered == 4
+    assert pub.unconfirmed_at_shutdown == 0 and pub.delivered == 4
 
 
 def test_null_publisher_when_kafka_not_configured(monkeypatch):

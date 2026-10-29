@@ -1,6 +1,6 @@
 # How to run NilePay fraud detection
 
-All commands run from the project root.
+All commands run from the project root. On Windows, see [RUN_WINDOWS.md](RUN_WINDOWS.md).
 
 ## 1. One-time setup
 

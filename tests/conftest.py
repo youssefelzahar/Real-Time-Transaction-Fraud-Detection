@@ -7,6 +7,13 @@ from src.train import run_experiment, save_artifacts
 TYPES = ["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
 
 
+@pytest.fixture(autouse=True)
+def no_real_kafka(monkeypatch):
+    """Apps built by tests must never publish to a real broker, even if the shell exported
+    KAFKA_BOOTSTRAP_SERVERS. test_kafka_integration reads it at import time, so it is unaffected."""
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
+
 def make_transactions(n=3000, seed=0):
     """Small PaySim-shaped dataset: fraud is TRANSFER/CASH_OUT that drains the sender."""
     rng = np.random.default_rng(seed)

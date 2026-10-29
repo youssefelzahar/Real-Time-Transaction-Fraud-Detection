@@ -1,6 +1,6 @@
 """Consume prediction events: validate, deduplicate, store, monitor (separate process).
 
-    python -m src.event_consumer            # run until SIGINT/SIGTERM
+    python -m src.event_consumer            # run until SIGINT/SIGTERM (or SIGBREAK / NILEPAY_STOP_FILE on Windows)
     python -m src.event_consumer --status   # consumer-group lag per partition, then exit
 
 Delivery: at-least-once. Offsets are committed only after an event has been written
@@ -27,6 +27,8 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from src.shutdown import stop_file_from_env, watch_stop_file
 
 log = logging.getLogger("nilepay.consumer")
 
@@ -250,10 +252,22 @@ class ConsumerRunner:
         self.pending_count += 1
 
     def lag(self):
+        # Runs inside the poll loop: one batched position()/committed() call, not one round trip per
+        # partition. Watermarks come from the fetch responses (cached), so no broker request either.
+        assigned = self.consumer.assignment()
+        if not assigned:
+            return {}
+        positions = {(tp.topic, tp.partition): tp.offset for tp in self.consumer.position(assigned)}
+        unknown = [tp for tp in assigned if positions[(tp.topic, tp.partition)] < 0]
+        if unknown:   # nothing fetched yet since assignment (e.g. just restarted): resume point
+            for tp in self.consumer.committed(unknown, timeout=1.0):
+                positions[(tp.topic, tp.partition)] = tp.offset
         lag = {}
-        for tp in self.consumer.assignment():
-            low, high = self.consumer.get_watermark_offsets(tp, timeout=1.0, cached=False)
-            position = self.consumer.position([tp])[0].offset
+        for tp in assigned:
+            low, high = self.consumer.get_watermark_offsets(tp, timeout=1.0, cached=True)
+            if high < 0:   # no fetch response for this partition yet: ask the broker once
+                low, high = self.consumer.get_watermark_offsets(tp, timeout=1.0, cached=False)
+            position = positions[(tp.topic, tp.partition)]
             lag[f"{tp.topic}[{tp.partition}]"] = max(high - (position if position >= 0 else low), 0)
         return lag
 
@@ -299,7 +313,10 @@ class ConsumerRunner:
                         (self.pending and self.clock() - self._last_commit >= self.commit_interval_s):
                     self.commit()
                 self._maybe_report()
-            self.commit()                       # graceful shutdown: commit what was processed
+            # Graceful shutdown: the current message was finished; commit what was processed.
+            if not self.commit():
+                log.warning("final commit deferred: %d partitions will be re-read after restart (at-least-once)",
+                            len(self.pending))
         except SinkFailure as e:
             # The failing event is not in `pending`, so it is never committed and a restart
             # reprocesses it (at-least-once). Events stored before it are committed if possible.
@@ -379,13 +396,21 @@ def main():
                             metrics_path=Path(store_dir) / "consumer_metrics.json")
     signal.signal(signal.SIGTERM, runner.stop)
     signal.signal(signal.SIGINT, runner.stop)
+    if hasattr(signal, "SIGBREAK"):           # Windows: Ctrl+Break in the consumer's own console
+        signal.signal(signal.SIGBREAK, runner.stop)
+    stop_file = stop_file_from_env()        # Windows: deploy/windows.py stop (see src/shutdown.py)
+    if stop_file:
+        watch_stop_file(stop_file, runner.stop)
     consumer.subscribe([topic])
     log.info("consuming %s as group %s; store %s", topic, group, store_dir)
     try:
         code = runner.run()
     finally:
+        started = time.monotonic()
         consumer.close()          # leaves the group cleanly (fast rebalance)
         processor.sink.close()
+        log.info("consumer closed and left group %s in %.2fs (exit code %s)", group, time.monotonic() - started,
+                 runner.exit_code)
     return code
 
 

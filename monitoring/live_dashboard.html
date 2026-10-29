@@ -173,6 +173,7 @@ let prev = null, smooth = {};
 const ema = (k, v) => (smooth[k] = smooth[k] == null ? v : smooth[k] * 0.5 + v * 0.5);
 const rate = (k, now, before, dt) => (now == null || before == null || dt <= 0) ? 0 : ema(k, Math.max(now - before, 0) / dt);
 const sum = (arr, f) => arr.reduce((s, x) => s + (f(x) || 0), 0);
+const notSent = e => (e.buffer_full_drops || 0) + (e.serialization_errors || 0) + (e.produce_errors || 0);
 let seen = new Set();
 
 function setNode(name, up, sub, big) {
@@ -200,8 +201,12 @@ function render(s) {
     const ev = x.events && x.events.kafka_enabled;
     const evr = p && ev && p.events ? R("ev" + x.n, x.events.enqueued, p.events.enqueued) : 0;
     evIn += evr;
-    const failed = ev ? sum(Object.values(x.events.failed || {}), v => v) + (x.events.buffer_full_drops || 0) : 0;
-    const sub = !x.up ? "DOWN" : !ev ? `${x.model_version} · Kafka off` : failed ? `${x.model_version} · ${fmt(failed)} lost (counted)` : `${x.model_version} · events ok`;
+    // since this instance process started: dropped = never handed to Kafka; not confirmed = client-reported failure
+    const dropped = ev ? notSent(x.events) : 0;
+    const unconf = ev ? sum(Object.values(x.events.failed || {}), v => v) : 0;
+    const sub = !x.up ? "DOWN" : !ev ? `${x.model_version} · Kafka off`
+      : dropped || unconf ? `${x.model_version} · ${dropped ? fmt(dropped) + " dropped " : ""}${unconf ? fmt(unconf) + " not confirmed" : ""}`
+      : `${x.model_version} · events ok`;
     setNode("inst" + x.n, x.up, sub, x.up ? `${fmt(r)} predictions/s` : "down");
     edges[`nginx-inst${x.n}`].p.setAttribute("class", "edge" + (x.up ? "" : " dead"));
     edges[`inst${x.n}-kafka`].p.setAttribute("class", "edge" + (x.up && ev && k.up ? "" : " dead"));
@@ -215,9 +220,12 @@ function render(s) {
   setNode("kafka", k.up, k.up ? `${k.partitions} partitions · lag ${fmt(k.lag)}` : `broker DOWN (${k.error || "unreachable"})`,
           k.up ? `${fmt(kafIn)} events/s in` : "down");
   const c = s.consumer;
-  setNode("consumer", c.alive, c.alive ? `dup ${fmt(c.duplicates)} · DLQ ${fmt(c.dead_lettered)}` : "NOT RUNNING",
-          c.alive ? `${fmt(stored)} stored/s` : "stopped");
-  setNode("store", true, s.store.file ? "JSONL · " + s.store.file.slice(18, 28) : "no file yet", `+${fmt(s.store.lines)} since open`);
+  const cLabel = c.alive ? `dup ${fmt(c.duplicates)} · DLQ ${fmt(c.dead_lettered)}`
+    : c.state === "starting" ? "STARTING · waiting for first heartbeat"
+    : c.state === "stalled" ? (c.heartbeat_age_s == null ? "STALLED · no heartbeat" : `STALLED · heartbeat ${Math.round(c.heartbeat_age_s)}s ago`)
+    : "NOT RUNNING";
+  setNode("consumer", c.alive, cLabel, c.alive ? `${fmt(stored)} stored/s` : c.state || "stopped");
+  setNode("store", true, s.store.file ? "JSONL · " + s.store.file.slice(18, 28) : "no file yet", `+${fmt(s.store.lines)} since dashboard start`);
   edges["kafka-consumer"].p.setAttribute("class", "edge" + (k.up && c.alive ? "" : " dead"));
   lane("toCons", ["kafka-consumer"], "event", false, c.alive ? stored : 0);
   lane("toStore", ["consumer-store"], "event", false, stored);
@@ -227,6 +235,10 @@ function render(s) {
   inst.forEach(x => { for (const d in dec) dec[d] += (x.by_decision || {})[d] || 0; });
   const evs = inst.map(x => x.events || {});
   const failedAll = sum(evs, e => e.failed ? Object.values(e.failed).reduce((a, b) => a + b, 0) : 0);
+  const L = s.ledger || {};
+  // Scopes: "current processes" = since each running instance started (resets on restart);
+  // "ended processes" = final counters of instances that shut down gracefully (producer ledger);
+  // Kafka offsets and the event store are persistent. Nothing here is summed across polls.
   const kpis = [
     ["requests/s (Nginx)", fmt(reqRate)],
     ["instances up", `${inst.filter(x => x.up).length} / ${inst.length}`],
@@ -234,9 +246,16 @@ function render(s) {
     ["review (total)", fmt(dec.review)],
     ["decline (total)", fmt(dec.decline)],
     ["would decline (shadow)", fmt(sum(inst, x => x.would_decline))],
-    ["events enqueued", fmt(sum(evs, e => e.enqueued))],
-    ["events delivered", fmt(sum(evs, e => e.delivered))],
-    ["events lost (counted)", fmt(failedAll + sum(evs, e => e.buffer_full_drops))],
+    ["events enqueued · current processes", fmt(sum(evs, e => e.enqueued))],
+    ["events delivered (acked) · current processes", fmt(sum(evs, e => e.delivered))],
+    ["in flight now (not yet acked)", fmt(sum(evs, e => e.in_flight))],
+    ["dropped before Kafka · current processes", fmt(sum(evs, notSent))],
+    ["delivery not confirmed · current processes", fmt(failedAll)],
+    ["delivered · ended processes", fmt(L.delivered)],
+    ["unconfirmed at shutdown · ended processes", fmt(L.unconfirmed_at_shutdown)],
+    ["instance exits without accounting", fmt(L.ended_without_record)],
+    ["events in Kafka topic (persistent)", k.up ? fmt(k.end_offset) : "broker down"],
+    ["stored since dashboard start", fmt(s.store.lines)],
     ["Kafka lag", k.up ? fmt(k.lag) : "broker down"],
     ["consumer latency p95", c.latency_ms && c.latency_ms.p95 != null ? `${fmt(c.latency_ms.p95)} ms` : "–"],
   ];

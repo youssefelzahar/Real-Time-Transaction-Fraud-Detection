@@ -14,6 +14,7 @@ Run:  MODEL_DIR=models/e7_v2 uvicorn api.main:app --reload
 import json
 import logging
 import os
+import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal, Optional, Protocol
@@ -23,8 +24,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.decision_engine import DEFAULT_POLICY_PATH, DecisionEngine, DecisionPolicy
-from src.events import KafkaEventPublisher, build_prediction_event
+from src.events import KafkaEventPublisher, ProducerLedger, build_prediction_event
 from src.predict import TIMING_LOG, FraudPredictor
+from src.shutdown import stop_file_from_env, watch_stop_file
 from time import perf_counter
 
 log = logging.getLogger("nilepay.api")
@@ -134,6 +136,14 @@ def resolve_balance(accounts, account_id, fallback):
     return None, "missing"
 
 
+def request_shutdown():
+    """Ask uvicorn to shut down gracefully, as Ctrl+C / SIGTERM would: stop accepting, finish
+    in-flight requests (--timeout-graceful-shutdown), then run the lifespan shutdown below.
+    raise_signal() is process-local, so it works on Windows where no signal can be sent to a
+    detached process from outside. Assumes one uvicorn process per instance (--workers 1)."""
+    signal.raise_signal(signal.SIGINT)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     if not hasattr(app.state, "predictor"):
@@ -148,8 +158,18 @@ async def lifespan(app: FastAPI):
     if not hasattr(app.state, "event_publisher"):
         # NullPublisher unless KAFKA_BOOTSTRAP_SERVERS is set. Does not need a reachable broker.
         app.state.event_publisher = KafkaEventPublisher.from_env(client_id=f"nilepay-api-{INSTANCE_ID or 'dev'}")
+    ledger = ProducerLedger.from_env(INSTANCE_ID)          # None unless EVENT_LEDGER_DIR is set
+    if ledger:
+        ledger.record_start(app.state.event_publisher)
+    stop_file = stop_file_from_env()                      # set by deploy/windows.py (see src/shutdown.py)
+    watcher = watch_stop_file(stop_file, lambda: request_shutdown()) if stop_file else None
     yield
-    app.state.event_publisher.close()   # bounded flush; leftovers counted as lost_on_shutdown
+    if watcher:
+        watcher.stop_watching.set()
+    started = perf_counter()
+    app.state.event_publisher.close()   # bounded flush; leftovers counted as unconfirmed_at_shutdown
+    if ledger:
+        ledger.record_stop(app.state.event_publisher, shutdown_s=perf_counter() - started)
 
 
 app = FastAPI(title="NilePay Fraud Scoring", lifespan=lifespan)
