@@ -181,11 +181,13 @@ An invalid newer baseline is skipped for the newest valid one, and the skipped f
    "test": {"name": "chi-square goodness of fit", "statistic": 7632.5, "df": 6, "p_value": 0.0, "p_holm": 0.0},
    "ks_distance": 0.7, "missing_rate": {"reference": 0.0, "production": 0.0},
    "threshold": {"moderate": 0.1, "substantial": 0.2}, "status": "drift_detected", "severity": "substantial",
-   "reasons": ["PSI 5.324701 >= 0.1 and Holm p 0.00e+00 < 0.01"],
+   "reasons": ["PSI 5.324701 >= 0.1 and Holm p 0.00e+00 < 0.01"], "drift_kinds": ["distribution"],
    "baseline_version": "bl-e7_v1-1", "model_version": "e7_v1", "detected_at": "2026-10-30T12:00:30+00:00"},
   {"feature": "orig_bal_zero", "type": "binary", "production_n": 1200, "psi": 0.0,
    "test": {"statistic": 0.0, "df": 1, "p_value": 1.0, "p_holm": 1.0}, "status": "no_significant_drift"}]}
 ```
+
+`drift_kinds` lists which checks fired: `distribution` (a population change), or `missing`, `unknown_category`, `non_finite` (data-quality problems). The retraining trigger evaluator ([RETRAINING_STRATEGY.md](RETRAINING_STRATEGY.md)) treats the latter as a data-pipeline problem, never as a reason to retrain.
 
 The resulting alert record (`drift_alerts.jsonl`):
 

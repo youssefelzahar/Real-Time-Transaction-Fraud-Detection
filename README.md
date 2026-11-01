@@ -227,6 +227,8 @@ The consumer also aggregates prediction behaviour and input data quality (rollin
 
 A separate drift monitor compares production inputs with the training baseline per feature. It uses PSI, a chi-square test with Holm adjustment, and missing-rate and unknown-category checks, and raises deduplicated alerts. Drift is a distribution change, not a measured loss of accuracy. **[DATA_DRIFT.md](DATA_DRIFT.md)**.
 
+When retraining may be considered, which data may be used, and how a candidate would be judged against the champion is set by a report-only policy (`config/retraining_policy.json`, `python -m src.retraining triggers`). Nothing retrains or promotes automatically, and existing model directories can't be overwritten. **[RETRAINING_STRATEGY.md](RETRAINING_STRATEGY.md)**.
+
 ### Limitations
 
 - **Six instances on one machine do not protect against machine-level failure.** Power, kernel, disk, network or memory failure on this host takes down all six instances and Nginx together. There's no real high availability, and nothing here supports a 99.9% availability claim.

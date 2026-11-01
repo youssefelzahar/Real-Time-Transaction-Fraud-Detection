@@ -511,6 +511,10 @@ def _finalize(res, cfg, adjusted):
         status = NO_DRIFT
     res["status"] = status
     res["severity"] = severity if status == DRIFT else None
+    # Which checks fired: "distribution" is a population change; the others are data-quality problems.
+    res["drift_kinds"] = [k for k, on in (("distribution", dist_drift), ("missing", missing_drift),
+                                          ("unknown_category", unknown_drift), ("non_finite", non_finite_drift))
+                          if on] if status == DRIFT else []
     return res
 
 

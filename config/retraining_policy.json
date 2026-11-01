@@ -1,0 +1,53 @@
+{
+  "_comment": "Retraining policy (RETRAINING_STRATEGY.md). Report-only: src.retraining evaluates and recommends; it never trains, promotes or changes serving. Values marked null need a business decision and keep every gate closed until set.",
+  "policy_version": "rp-2026-11-01.1",
+  "mode": "report_only",
+  "auto_train": false,
+  "auto_promote": false,
+
+  "artifacts": {
+    "models_dir": "models",
+    "protected_model_dirs": ["models/e7_v1"],
+    "_note": "Every existing artifact directory is immutable; new candidates need a new versioned directory."
+  },
+
+  "triggers": {
+    "drift_config": "config/drift_config.json",
+    "_note": "Drift thresholds, min_samples and sustained_minutes come from drift_config.json (PSI bands are uncalibrated heuristics). Drift alone can only lead to investigation.",
+    "long_window": "24h",
+    "monitored_traffic_sources": ["production"],
+    "max_report_age_s": 900
+  },
+
+  "labels": {
+    "target_column": "isFraud",
+    "forbidden_targets": ["isFlaggedFraud", "fraud_probability", "decision", "would_decline", "reason_code"],
+    "allowed_label_sources": ["chargeback", "manual_review", "confirmed_investigation", "paysim_offline"],
+    "min_labels": 100,
+    "min_fraud_labels": 30,
+    "maturity_days": 30,
+    "_note": "min_labels matches src.ml_performance.MIN_LABELS. min_fraud_labels is a placeholder, not a calibrated value: with 30 fraud labels a measured recall of 0.90 has a Wilson 95% interval of 0.74-0.97, so only large drops are detectable. More fraud labels narrow it."
+  },
+
+  "performance_gates": {
+    "_note": "Business-approved limits do not exist yet. null = business_decision_required: a gate that is null never passes.",
+    "recall_floor": null,
+    "fpr_ceiling": null,
+    "max_cost_per_1k_transactions": null,
+    "min_cost_improvement_vs_champion": null,
+    "confidence": 0.95
+  },
+
+  "training_data": {
+    "point_in_time_feature_source": null,
+    "require_explicit_production_tag": true,
+    "_note": "Prediction events deliberately carry no amounts or balances (src/events.py RESPONSE_FIELDS), so they can be evaluated but not trained on. A point-in-time raw-feature log needs a privacy/data-owner decision. Untagged rows are never treated as production training data: before tagging existed, 10.6M untagged events were load tests (Phase 1)."
+  },
+
+  "features": {
+    "forbidden": ["newbalanceOrig", "newbalanceDest", "isFlaggedFraud", "isFraud", "drains_orig", "amt_to_orig_bal", "hour", "step"],
+    "justification_required": {
+      "exceeds_orig_bal": "PaySim legitimate transfers exceed the sender balance 90% of the time (Phase 2 R4); show the feature is valid on realistic traffic."
+    }
+  }
+}
