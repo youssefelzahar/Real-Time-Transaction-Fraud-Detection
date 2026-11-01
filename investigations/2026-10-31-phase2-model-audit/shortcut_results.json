@@ -1,0 +1,438 @@
+{
+  "mechanism": {
+    "train": {
+      "rows": 3792821,
+      "fraud": 3175,
+      "fraud_by_type": {
+        "CASH_OUT": 1597,
+        "TRANSFER": 1578
+      },
+      "drains_share": {
+        "fraud": 0.9779527559055118,
+        "legit": 2.6387688982031567e-07,
+        "legit_TRANSFER_CASH_OUT": 0.0
+      },
+      "drains_or_max_share_of_fraud": 0.9892913385826771,
+      "rule_flags": {
+        "fraud": 3141,
+        "legit": 168
+      },
+      "exceeds_orig_bal_share": {
+        "fraud": 0.009133858267716535,
+        "legit": 0.6369602860003283,
+        "legit_TRANSFER_CASH_OUT": 0.9000211180498989,
+        "legit_by_type": {
+          "CASH_IN": 0.33999497098692577,
+          "CASH_OUT": 0.8869455094880334,
+          "DEBIT": 0.2915863840719332,
+          "PAYMENT": 0.4952385573548793,
+          "TRANSFER": 0.9564450487952715
+        }
+      }
+    },
+    "val": {
+      "rows": 1276276,
+      "fraud": 780,
+      "fraud_by_type": {
+        "TRANSFER": 390,
+        "CASH_OUT": 390
+      },
+      "drains_share": {
+        "fraud": 0.9910256410256411,
+        "legit": 0.0,
+        "legit_TRANSFER_CASH_OUT": 0.0
+      },
+      "drains_or_max_share_of_fraud": 1.0,
+      "rule_flags": {
+        "fraud": 780,
+        "legit": 5049
+      },
+      "exceeds_orig_bal_share": {
+        "fraud": 0.0,
+        "legit": 0.6594226873310461,
+        "legit_TRANSFER_CASH_OUT": 0.9060294646065397,
+        "legit_by_type": {
+          "CASH_IN": 0.3457783087633961,
+          "CASH_OUT": 0.8911574768455673,
+          "DEBIT": 0.2982970565016353,
+          "PAYMENT": 0.5524929394506881,
+          "TRANSFER": 0.9683565553130771
+        }
+      }
+    },
+    "test": {
+      "rows": 1293523,
+      "fraud": 4258,
+      "fraud_by_type": {
+        "TRANSFER": 2129,
+        "CASH_OUT": 2129
+      },
+      "drains_share": {
+        "fraud": 0.9722874589008924,
+        "legit": 0.0,
+        "legit_TRANSFER_CASH_OUT": 0.0
+      },
+      "drains_or_max_share_of_fraud": 0.9962423673085956,
+      "rule_flags": {
+        "fraud": 4242,
+        "legit": 146
+      },
+      "exceeds_orig_bal_share": {
+        "fraud": 0.0,
+        "legit": 0.6392060592663261,
+        "legit_TRANSFER_CASH_OUT": 0.8986093833789941,
+        "legit_by_type": {
+          "CASH_IN": 0.3405526564390018,
+          "CASH_OUT": 0.883103406595161,
+          "DEBIT": 0.2530944625407166,
+          "PAYMENT": 0.5201195666831483,
+          "TRANSFER": 0.9605458537163055
+        }
+      }
+    }
+  },
+  "hour_pattern_train": {
+    "legit_share_hours_0_6": 0.01809614935009761,
+    "fraud_share_hours_0_6": 0.2607874015748031,
+    "fraud_rate_hours_0_6": 0.011929804339682448,
+    "fraud_rate_hours_7_23": 0.0006303353238894939
+  },
+  "rule_drains_or_max": {
+    "val": {
+      "threshold": 0.5,
+      "accuracy": 0.9960439591436335,
+      "precision": 0.13381369016984046,
+      "recall": 1.0,
+      "f1": 0.23604176123468,
+      "pr_auc": 0.13381369016984046,
+      "fpr": 0.0039584600814114666,
+      "TP": 780,
+      "FP": 5049,
+      "FN": 0,
+      "TN": 1270447,
+      "cost": 5049,
+      "cost_per_fraud": 6.473076923076923,
+      "n": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "threshold": 0.5,
+      "accuracy": 0.9998747606343297,
+      "precision": 0.9667274384685506,
+      "recall": 0.9962423673085956,
+      "f1": 0.981263011797363,
+      "pr_auc": 0.9631072011621498,
+      "fpr": 0.0001132428166435915,
+      "TP": 4242,
+      "FP": 146,
+      "FN": 16,
+      "TN": 1289119,
+      "cost": 1746,
+      "cost_per_fraud": 0.41005166744950683,
+      "n": 1293523,
+      "fraud": 4258
+    }
+  },
+  "e4_threshold_ties": {
+    "val_cost_min": 0,
+    "tied_range": [
+      0.97,
+      0.99
+    ],
+    "n_tied": 3,
+    "test_cost_over_tied": [
+      1002,
+      1202
+    ]
+  },
+  "sliced_test_TRANSFER_CASH_OUT": {
+    "E1": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4199,
+        "FP": 2,
+        "FN": 59,
+        "TN": 55585,
+        "fpr": 3.597963552629212e-05,
+        "recall": 0.9861437294504463,
+        "precision": 0.9995239228755058
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 2509,
+        "FN": 0,
+        "TN": 490150,
+        "fpr": 0.00509277207967377,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E2": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4104,
+        "FP": 2071,
+        "FN": 154,
+        "TN": 53516,
+        "fpr": 0.03725691258747549,
+        "recall": 0.9638327853452325,
+        "precision": 0.6646153846153846
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 2276,
+        "FN": 0,
+        "TN": 490383,
+        "fpr": 0.004619828319385214,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E3": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4027,
+        "FP": 1513,
+        "FN": 231,
+        "TN": 54074,
+        "fpr": 0.02721859427563999,
+        "recall": 0.9457491780178487,
+        "precision": 0.7268953068592058
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 1707,
+        "FN": 0,
+        "TN": 490952,
+        "fpr": 0.0034648712395389104,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E4": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4248,
+        "FP": 0,
+        "FN": 10,
+        "TN": 55587,
+        "fpr": 0.0,
+        "recall": 0.9976514795678723,
+        "precision": 1.0
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 2,
+        "FN": 0,
+        "TN": 492657,
+        "fpr": 4.059603092605636e-06,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E5": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4179,
+        "FP": 1754,
+        "FN": 79,
+        "TN": 53833,
+        "fpr": 0.03155414035655819,
+        "recall": 0.9814466885861907,
+        "precision": 0.7043654137872915
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 26,
+        "FN": 0,
+        "TN": 492633,
+        "fpr": 5.2774840203873266e-05,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E6": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4255,
+        "FP": 0,
+        "FN": 3,
+        "TN": 55587,
+        "fpr": 0.0,
+        "recall": 0.9992954438703616,
+        "precision": 1.0
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 5,
+        "FN": 0,
+        "TN": 492654,
+        "fpr": 1.014900773151409e-05,
+        "recall": null,
+        "precision": 0.0
+      }
+    },
+    "E7": {
+      "sufficient_funds": {
+        "rows": 59845,
+        "fraud": 4258,
+        "TP": 4207,
+        "FP": 1619,
+        "FN": 51,
+        "TN": 53968,
+        "fpr": 0.02912551495853347,
+        "recall": 0.9880225457961485,
+        "precision": 0.7221077926536217
+      },
+      "exceeds_balance": {
+        "rows": 492659,
+        "fraud": 0,
+        "TP": 0,
+        "FP": 47,
+        "FN": 0,
+        "TN": 492612,
+        "fpr": 9.540067267623244e-05,
+        "recall": null,
+        "precision": 0.0
+      }
+    }
+  },
+  "bootstrap_cost_diff": {
+    "test": {
+      "E7-E5": {
+        "observed": -2914.0,
+        "ci95": [
+          -4703.8,
+          -1213.7500000000014
+        ],
+        "share_of_resamples_a_cheaper": 0.9995
+      },
+      "E7-E2": {
+        "observed": -12981.0,
+        "ci95": [
+          -15986.05,
+          -10227.975
+        ],
+        "share_of_resamples_a_cheaper": 1.0
+      },
+      "E7-E1": {
+        "observed": -1645.0,
+        "ci95": [
+          -3522.175,
+          219.04999999999973
+        ],
+        "share_of_resamples_a_cheaper": 0.96
+      },
+      "E5-E2": {
+        "observed": -10067.0,
+        "ci95": [
+          -12411.55,
+          -7945.225000000004
+        ],
+        "share_of_resamples_a_cheaper": 1.0
+      }
+    },
+    "validation": {
+      "E7-E5": {
+        "observed": -226.0,
+        "ci95": [
+          -882.0,
+          383.0499999999997
+        ],
+        "share_of_resamples_a_cheaper": 0.7655
+      },
+      "E7-E2": {
+        "observed": -3833.0,
+        "ci95": [
+          -4966.125,
+          -2768.7750000000015
+        ],
+        "share_of_resamples_a_cheaper": 1.0
+      },
+      "E7-E1": {
+        "observed": -392.0,
+        "ci95": [
+          -1173.025,
+          323.0499999999997
+        ],
+        "share_of_resamples_a_cheaper": 0.864
+      },
+      "E5-E2": {
+        "observed": -3607.0,
+        "ci95": [
+          -4590.05,
+          -2687.625000000002
+        ],
+        "share_of_resamples_a_cheaper": 1.0
+      }
+    }
+  },
+  "e7_test_by_period": [
+    {
+      "steps": [
+        355,
+        451
+      ],
+      "rows": 949371,
+      "fraud": 1106,
+      "fraud_rate": 0.0011649818669413749,
+      "FN": 11,
+      "FP": 1169,
+      "cost": 2269
+    },
+    {
+      "steps": [
+        452,
+        548
+      ],
+      "rows": 142105,
+      "fraud": 984,
+      "fraud_rate": 0.006924457267513459,
+      "FN": 14,
+      "FP": 187,
+      "cost": 1587
+    },
+    {
+      "steps": [
+        549,
+        645
+      ],
+      "rows": 120893,
+      "fraud": 1076,
+      "fraud_rate": 0.008900432613964416,
+      "FN": 14,
+      "FP": 195,
+      "cost": 1595
+    },
+    {
+      "steps": [
+        646,
+        743
+      ],
+      "rows": 81154,
+      "fraud": 1092,
+      "fraud_rate": 0.013455898661803484,
+      "FN": 12,
+      "FP": 115,
+      "cost": 1315
+    }
+  ]
+}

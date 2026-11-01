@@ -40,7 +40,7 @@ async def send_batch(url, n_requests, concurrency, seed):
         async with sem:
             t0 = time.perf_counter()
             try:
-                r = await client.post(f"{url}/predict", json=p)
+                r = await client.post(f"{url}/predict", json=p, headers={"X-Traffic-Source": "loadtest"})
                 if r.status_code != 200:
                     errors += 1
             except httpx.HTTPError:

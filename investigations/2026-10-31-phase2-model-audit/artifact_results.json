@@ -1,0 +1,843 @@
+{
+  "data": {
+    "path": "data/fraud_data.csv",
+    "sha256": "16910f90577b0d981bf8ff289714510bb89bc71bff7d3f220f024e287e4eea6b"
+  },
+  "splits": {
+    "val": {
+      "steps": [
+        281,
+        354
+      ],
+      "rows": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "steps": [
+        355,
+        743
+      ],
+      "rows": 1293523,
+      "fraud": 4258
+    }
+  },
+  "e5_v1": {
+    "sha256": {
+      "model.json": "ce8e8dfde37087128f709f84a29296d6737e2606fde97c08168d8d343405944d",
+      "pipeline.json": "6e1c03d70f2f293b8ecc5af5203371082456f97cd54d5789d89977d276eff297",
+      "metadata.json": "f4dca281338eafa84d14effadecb84b23c77f625aaaa821cafc23e0c29971a3a"
+    },
+    "feature_set": "E5",
+    "trained_at": "2026-10-23T13:34:57+00:00",
+    "feature_names": [
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "exceeds_orig_bal",
+      "orig_bal_zero",
+      "dest_bal_zero",
+      "amt_to_dest_bal",
+      "is_max_amount",
+      "amt_vs_type_median",
+      "hour",
+      "type_CASH_IN",
+      "type_CASH_OUT",
+      "type_DEBIT",
+      "type_PAYMENT",
+      "type_TRANSFER"
+    ],
+    "required_inputs": [
+      "type",
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "step"
+    ],
+    "threshold": {
+      "recorded": 0.53,
+      "reselected_on_val": 0.53,
+      "val_cost": 2977,
+      "grid": [
+        0.01,
+        0.99
+      ],
+      "tied_minimum": [
+        0.53,
+        0.53
+      ],
+      "at_grid_edge": false,
+      "val_cost_above_grid": {
+        "0.99": 12313,
+        "0.991": 12699,
+        "0.992": 13086,
+        "0.993": 13674,
+        "0.994": 14267,
+        "0.995": 15156,
+        "0.996": 16247,
+        "0.997": 17826,
+        "0.998": 19217,
+        "0.999": 23112,
+        "1.0": 78000
+      }
+    },
+    "validation": {
+      "threshold": 0.53,
+      "accuracy": 0.9986758350074749,
+      "precision": 0.31382978723404253,
+      "recall": 0.9833333333333333,
+      "f1": 0.47580645161290325,
+      "pr_auc": 0.9200992663063845,
+      "fpr": 0.0013147826414194948,
+      "TP": 767,
+      "FP": 1677,
+      "FN": 13,
+      "TN": 1273819,
+      "cost": 2977,
+      "cost_per_fraud": 3.816666666666667,
+      "n": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "threshold": 0.53,
+      "accuracy": 0.9985628396248076,
+      "precision": 0.7012921631146165,
+      "recall": 0.9814466885861907,
+      "f1": 0.8180483507879025,
+      "pr_auc": 0.9711155215050782,
+      "fpr": 0.0013806316001752936,
+      "TP": 4179,
+      "FP": 1780,
+      "FN": 79,
+      "TN": 1287485,
+      "cost": 9680,
+      "cost_per_fraud": 2.2733677782996713,
+      "n": 1293523,
+      "fraud": 4258
+    },
+    "validation_vs_recorded": {
+      "threshold": {
+        "recorded": 0.53,
+        "reproduced": 0.53,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.31382978723404253,
+        "reproduced": 0.31382978723404253,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.9833333333333333,
+        "reproduced": 0.9833333333333333,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.9200992663063845,
+        "reproduced": 0.9200992663063845,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.0013147826414194948,
+        "reproduced": 0.0013147826414194948,
+        "match": true
+      },
+      "TP": {
+        "recorded": 767,
+        "reproduced": 767,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1677,
+        "reproduced": 1677,
+        "match": true
+      },
+      "FN": {
+        "recorded": 13,
+        "reproduced": 13,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1273819,
+        "reproduced": 1273819,
+        "match": true
+      },
+      "cost": {
+        "recorded": 2977,
+        "reproduced": 2977,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 3.816666666666667,
+        "reproduced": 3.816666666666667,
+        "match": true
+      }
+    },
+    "test_vs_recorded": {
+      "threshold": {
+        "recorded": 0.53,
+        "reproduced": 0.53,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.7012921631146165,
+        "reproduced": 0.7012921631146165,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.9814466885861907,
+        "reproduced": 0.9814466885861907,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.9711155215050782,
+        "reproduced": 0.9711155215050782,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.0013806316001752936,
+        "reproduced": 0.0013806316001752936,
+        "match": true
+      },
+      "TP": {
+        "recorded": 4179,
+        "reproduced": 4179,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1780,
+        "reproduced": 1780,
+        "match": true
+      },
+      "FN": {
+        "recorded": 79,
+        "reproduced": 79,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1287485,
+        "reproduced": 1287485,
+        "match": true
+      },
+      "cost": {
+        "recorded": 9680,
+        "reproduced": 9680,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 2.2733677782996713,
+        "reproduced": 2.2733677782996713,
+        "match": true
+      }
+    },
+    "all_recorded_metrics_reproduced": true
+  },
+  "e6_v1": {
+    "sha256": {
+      "model.json": "d6b88deede53224b1fb27ab2441b5551b036ce80f5bd2e22e0f56c68b61a15c5",
+      "pipeline.json": "75a31eb3e9920ed5155d8f33434f392cf52fea3f9b26528afb7061ef310bfefb",
+      "metadata.json": "8c79a2cdd38650dfdea12de69322bdf126a4283313f81abeb2cf5159ea906235"
+    },
+    "feature_set": "E6",
+    "trained_at": "2026-10-23T13:34:57+00:00",
+    "feature_names": [
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "amt_to_orig_bal",
+      "exceeds_orig_bal",
+      "orig_bal_zero",
+      "dest_bal_zero",
+      "is_max_amount",
+      "amt_vs_type_median"
+    ],
+    "required_inputs": [
+      "type",
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest"
+    ],
+    "threshold": {
+      "recorded": 0.99,
+      "reselected_on_val": 0.99,
+      "val_cost": 7,
+      "grid": [
+        0.01,
+        0.99
+      ],
+      "tied_minimum": [
+        0.99,
+        0.99
+      ],
+      "at_grid_edge": true,
+      "val_cost_above_grid": {
+        "0.99": 7,
+        "0.991": 6,
+        "0.992": 6,
+        "0.993": 1,
+        "0.994": 1,
+        "0.995": 0,
+        "0.996": 0,
+        "0.997": 0,
+        "0.998": 0,
+        "0.999": 0,
+        "1.0": 72700
+      }
+    },
+    "validation": {
+      "threshold": 0.99,
+      "accuracy": 0.9999945152929304,
+      "precision": 0.9911054637865311,
+      "recall": 1.0,
+      "f1": 0.9955328653477984,
+      "pr_auc": 1.0,
+      "fpr": 5.488061115048577e-06,
+      "TP": 780,
+      "FP": 7,
+      "FN": 0,
+      "TN": 1275489,
+      "cost": 7,
+      "cost_per_fraud": 0.008974358974358974,
+      "n": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "threshold": 0.99,
+      "accuracy": 0.9999938153399669,
+      "precision": 0.9988262910798122,
+      "recall": 0.9992954438703616,
+      "f1": 0.9990608123972764,
+      "pr_auc": 0.9997635153643375,
+      "fpr": 3.878178652177791e-06,
+      "TP": 4255,
+      "FP": 5,
+      "FN": 3,
+      "TN": 1289260,
+      "cost": 305,
+      "cost_per_fraud": 0.07162987317989666,
+      "n": 1293523,
+      "fraud": 4258
+    },
+    "validation_vs_recorded": {
+      "threshold": {
+        "recorded": 0.99,
+        "reproduced": 0.99,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.9911054637865311,
+        "reproduced": 0.9911054637865311,
+        "match": true
+      },
+      "recall": {
+        "recorded": 1.0,
+        "reproduced": 1.0,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 1.0,
+        "reproduced": 1.0,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 5.488061115048577e-06,
+        "reproduced": 5.488061115048577e-06,
+        "match": true
+      },
+      "TP": {
+        "recorded": 780,
+        "reproduced": 780,
+        "match": true
+      },
+      "FP": {
+        "recorded": 7,
+        "reproduced": 7,
+        "match": true
+      },
+      "FN": {
+        "recorded": 0,
+        "reproduced": 0,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1275489,
+        "reproduced": 1275489,
+        "match": true
+      },
+      "cost": {
+        "recorded": 7,
+        "reproduced": 7,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 0.008974358974358974,
+        "reproduced": 0.008974358974358974,
+        "match": true
+      }
+    },
+    "test_vs_recorded": {
+      "threshold": {
+        "recorded": 0.99,
+        "reproduced": 0.99,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.9988262910798122,
+        "reproduced": 0.9988262910798122,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.9992954438703616,
+        "reproduced": 0.9992954438703616,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.9997635153643375,
+        "reproduced": 0.9997635153643375,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 3.878178652177791e-06,
+        "reproduced": 3.878178652177791e-06,
+        "match": true
+      },
+      "TP": {
+        "recorded": 4255,
+        "reproduced": 4255,
+        "match": true
+      },
+      "FP": {
+        "recorded": 5,
+        "reproduced": 5,
+        "match": true
+      },
+      "FN": {
+        "recorded": 3,
+        "reproduced": 3,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1289260,
+        "reproduced": 1289260,
+        "match": true
+      },
+      "cost": {
+        "recorded": 305,
+        "reproduced": 305,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 0.07162987317989666,
+        "reproduced": 0.07162987317989666,
+        "match": true
+      }
+    },
+    "all_recorded_metrics_reproduced": true
+  },
+  "e7_v1": {
+    "sha256": {
+      "model.json": "83f976e0052899ad029b042a2a2a27c78bea3cde5f7c1d49a803acff5491736f",
+      "pipeline.json": "1fe84390959ac854ab0a5773dc659d4b9029aec3c0a54f2e36c0cc625ed570d1",
+      "metadata.json": "ad6cdc08822dba4262d84cead3d9986f238d99521849f6a6998d3bd467a6b2d2"
+    },
+    "feature_set": "E7",
+    "trained_at": "2026-10-23T13:34:57+00:00",
+    "feature_names": [
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "exceeds_orig_bal",
+      "orig_bal_zero",
+      "dest_bal_zero",
+      "is_max_amount",
+      "amt_vs_type_median",
+      "type_code"
+    ],
+    "required_inputs": [
+      "type",
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest"
+    ],
+    "threshold": {
+      "recorded": 0.54,
+      "reselected_on_val": 0.54,
+      "val_cost": 2751,
+      "grid": [
+        0.01,
+        0.99
+      ],
+      "tied_minimum": [
+        0.54,
+        0.54
+      ],
+      "at_grid_edge": false,
+      "val_cost_above_grid": {
+        "0.99": 10207,
+        "0.991": 11165,
+        "0.992": 12303,
+        "0.993": 14523,
+        "0.994": 15779,
+        "0.995": 17331,
+        "0.996": 18787,
+        "0.997": 20555,
+        "0.998": 21942,
+        "0.999": 24324,
+        "1.0": 78000
+      }
+    },
+    "validation": {
+      "threshold": 0.54,
+      "accuracy": 0.9986977738357534,
+      "precision": 0.3177685950413223,
+      "recall": 0.985897435897436,
+      "f1": 0.480625,
+      "pr_auc": 0.8916457458160059,
+      "fpr": 0.001294398414420743,
+      "TP": 769,
+      "FP": 1651,
+      "FN": 11,
+      "TN": 1273845,
+      "cost": 2751,
+      "cost_per_fraud": 3.526923076923077,
+      "n": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "threshold": 0.54,
+      "accuracy": 0.9986726173403951,
+      "precision": 0.7163289630512515,
+      "recall": 0.9880225457961485,
+      "f1": 0.8305201855690455,
+      "pr_auc": 0.9681929622448056,
+      "fpr": 0.00129220912690564,
+      "TP": 4207,
+      "FP": 1666,
+      "FN": 51,
+      "TN": 1287599,
+      "cost": 6766,
+      "cost_per_fraud": 1.5890089243776422,
+      "n": 1293523,
+      "fraud": 4258
+    },
+    "validation_vs_recorded": {
+      "threshold": {
+        "recorded": 0.54,
+        "reproduced": 0.54,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.3177685950413223,
+        "reproduced": 0.3177685950413223,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.985897435897436,
+        "reproduced": 0.985897435897436,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.8916457458160059,
+        "reproduced": 0.8916457458160059,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.001294398414420743,
+        "reproduced": 0.001294398414420743,
+        "match": true
+      },
+      "TP": {
+        "recorded": 769,
+        "reproduced": 769,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1651,
+        "reproduced": 1651,
+        "match": true
+      },
+      "FN": {
+        "recorded": 11,
+        "reproduced": 11,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1273845,
+        "reproduced": 1273845,
+        "match": true
+      },
+      "cost": {
+        "recorded": 2751,
+        "reproduced": 2751,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 3.526923076923077,
+        "reproduced": 3.526923076923077,
+        "match": true
+      }
+    },
+    "test_vs_recorded": {
+      "threshold": {
+        "recorded": 0.54,
+        "reproduced": 0.54,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.7163289630512515,
+        "reproduced": 0.7163289630512515,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.9880225457961485,
+        "reproduced": 0.9880225457961485,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.9681929622448056,
+        "reproduced": 0.9681929622448056,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.00129220912690564,
+        "reproduced": 0.00129220912690564,
+        "match": true
+      },
+      "TP": {
+        "recorded": 4207,
+        "reproduced": 4207,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1666,
+        "reproduced": 1666,
+        "match": true
+      },
+      "FN": {
+        "recorded": 51,
+        "reproduced": 51,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1287599,
+        "reproduced": 1287599,
+        "match": true
+      },
+      "cost": {
+        "recorded": 6766,
+        "reproduced": 6766,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 1.5890089243776422,
+        "reproduced": 1.5890089243776422,
+        "match": true
+      }
+    },
+    "all_recorded_metrics_reproduced": true
+  },
+  "e7_v2": {
+    "sha256": {
+      "model.json": "83f976e0052899ad029b042a2a2a27c78bea3cde5f7c1d49a803acff5491736f",
+      "pipeline.json": "1fe84390959ac854ab0a5773dc659d4b9029aec3c0a54f2e36c0cc625ed570d1",
+      "metadata.json": "46a4cc6bf269d3ef2ef6922fb17ca0be83f952262c3e11054ffa1f7ddac542af"
+    },
+    "feature_set": "E7",
+    "trained_at": "2026-10-24T14:56:51+00:00",
+    "feature_names": [
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest",
+      "exceeds_orig_bal",
+      "orig_bal_zero",
+      "dest_bal_zero",
+      "is_max_amount",
+      "amt_vs_type_median",
+      "type_code"
+    ],
+    "required_inputs": [
+      "type",
+      "amount",
+      "oldbalanceOrg",
+      "oldbalanceDest"
+    ],
+    "threshold": {
+      "recorded": 0.54,
+      "reselected_on_val": 0.54,
+      "val_cost": 2751,
+      "grid": [
+        0.01,
+        0.99
+      ],
+      "tied_minimum": [
+        0.54,
+        0.54
+      ],
+      "at_grid_edge": false,
+      "val_cost_above_grid": {
+        "0.99": 10207,
+        "0.991": 11165,
+        "0.992": 12303,
+        "0.993": 14523,
+        "0.994": 15779,
+        "0.995": 17331,
+        "0.996": 18787,
+        "0.997": 20555,
+        "0.998": 21942,
+        "0.999": 24324,
+        "1.0": 78000
+      }
+    },
+    "validation": {
+      "threshold": 0.54,
+      "accuracy": 0.9986977738357534,
+      "precision": 0.3177685950413223,
+      "recall": 0.985897435897436,
+      "f1": 0.480625,
+      "pr_auc": 0.8916457458160059,
+      "fpr": 0.001294398414420743,
+      "TP": 769,
+      "FP": 1651,
+      "FN": 11,
+      "TN": 1273845,
+      "cost": 2751,
+      "cost_per_fraud": 3.526923076923077,
+      "n": 1276276,
+      "fraud": 780
+    },
+    "test": {
+      "threshold": 0.54,
+      "accuracy": 0.9986726173403951,
+      "precision": 0.7163289630512515,
+      "recall": 0.9880225457961485,
+      "f1": 0.8305201855690455,
+      "pr_auc": 0.9681929622448056,
+      "fpr": 0.00129220912690564,
+      "TP": 4207,
+      "FP": 1666,
+      "FN": 51,
+      "TN": 1287599,
+      "cost": 6766,
+      "cost_per_fraud": 1.5890089243776422,
+      "n": 1293523,
+      "fraud": 4258
+    },
+    "validation_vs_recorded": {
+      "threshold": {
+        "recorded": 0.54,
+        "reproduced": 0.54,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.3177685950413223,
+        "reproduced": 0.3177685950413223,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.985897435897436,
+        "reproduced": 0.985897435897436,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.8916457458160059,
+        "reproduced": 0.8916457458160059,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.001294398414420743,
+        "reproduced": 0.001294398414420743,
+        "match": true
+      },
+      "TP": {
+        "recorded": 769,
+        "reproduced": 769,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1651,
+        "reproduced": 1651,
+        "match": true
+      },
+      "FN": {
+        "recorded": 11,
+        "reproduced": 11,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1273845,
+        "reproduced": 1273845,
+        "match": true
+      },
+      "cost": {
+        "recorded": 2751,
+        "reproduced": 2751,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 3.526923076923077,
+        "reproduced": 3.526923076923077,
+        "match": true
+      }
+    },
+    "test_vs_recorded": {
+      "threshold": {
+        "recorded": 0.54,
+        "reproduced": 0.54,
+        "match": true
+      },
+      "precision": {
+        "recorded": 0.7163289630512515,
+        "reproduced": 0.7163289630512515,
+        "match": true
+      },
+      "recall": {
+        "recorded": 0.9880225457961485,
+        "reproduced": 0.9880225457961485,
+        "match": true
+      },
+      "pr_auc": {
+        "recorded": 0.9681929622448056,
+        "reproduced": 0.9681929622448056,
+        "match": true
+      },
+      "fpr": {
+        "recorded": 0.00129220912690564,
+        "reproduced": 0.00129220912690564,
+        "match": true
+      },
+      "TP": {
+        "recorded": 4207,
+        "reproduced": 4207,
+        "match": true
+      },
+      "FP": {
+        "recorded": 1666,
+        "reproduced": 1666,
+        "match": true
+      },
+      "FN": {
+        "recorded": 51,
+        "reproduced": 51,
+        "match": true
+      },
+      "TN": {
+        "recorded": 1287599,
+        "reproduced": 1287599,
+        "match": true
+      },
+      "cost": {
+        "recorded": 6766,
+        "reproduced": 6766,
+        "match": true
+      },
+      "cost_per_fraud": {
+        "recorded": 1.5890089243776422,
+        "reproduced": 1.5890089243776422,
+        "match": true
+      }
+    },
+    "all_recorded_metrics_reproduced": true
+  },
+  "e7_v1_equals_e7_v2": {
+    "model.json": true,
+    "pipeline.json": true
+  }
+}

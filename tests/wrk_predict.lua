@@ -36,6 +36,8 @@ function init(args)
   wrk.method = "POST"
   wrk.path = "/predict"
   wrk.headers["Content-Type"] = "application/json"
+  -- Tagged as load test: counted in its own monitoring series, never as production drift.
+  wrk.headers["X-Traffic-Source"] = "loadtest"
 end
 
 function request()

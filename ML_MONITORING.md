@@ -162,6 +162,7 @@ The command takes 28 s and writes `monitoring/baselines/e7_v1/bl-e7_v1-1.json` (
     - This is a **reference distribution only**; the thresholds were tuned on this split, so it is never used to evaluate the model.
 - **Immutable:** an existing version is never overwritten (`--version 2` for a new one).
 - **Never fitted on production data.**
+- **Traffic sources:** production keeps the series key `model|policy`. Tagged traffic (`X-Traffic-Source`: loadtest, test, demo) gets its own series, `model|policy|source`, so load tests and demos never mix with production statistics. See [DATA_DRIFT.md](DATA_DRIFT.md#traffic-sources).
 - **Version matching:** the dashboard picks the highest `bl-<model_version>-<n>.json` for each series. A model version without a baseline shows "no baseline for this model version", for example the 27 `e6_test` events left in the live store by an earlier test run.
 
 ## 6. Model performance (when labels exist)
@@ -294,6 +295,9 @@ No test uses a broker. The `no_real_kafka` fixture removes `KAFKA_BOOTSTRAP_SERV
 - **Load-test traffic isn't production traffic:** live comparisons with the baseline (the TVD of 0.29) describe the synthetic test traffic, not real users.
 
 ## 11. Handoff: Drift Detection
+
+**Implemented:** see [DATA_DRIFT.md](DATA_DRIFT.md). It covers PSI, chi-square with Holm, missing-rate and unknown-category checks, prediction drift, baseline schema 2, the drift monitor process, alerts and the dashboard section. The notes below are the original handoff.
+
 Ready to use:
 - `bl-e7_v1-1` holds the per-feature bin distributions (`bins`), quantiles, flag rates, type proportions and a validation score histogram, all on the **same bins** the events and windows use.
 - `series_report` already outputs window bin counts for each feature, plus the score histogram, type counts and flag rates.

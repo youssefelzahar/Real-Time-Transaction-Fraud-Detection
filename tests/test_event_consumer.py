@@ -282,3 +282,13 @@ def test_lag_after_restart_uses_committed_offset_not_log_start():
 
     runner = ConsumerRunner(LagConsumer(), processor(), FakeDlq(), "events.dlq")
     assert runner.lag() == {"events[0]": 0, "events[1]": 0}
+
+
+def test_traffic_source_is_validated_and_stored():
+    p = processor()
+    assert p.handle(raw_event(traffic_source="loadtest")) == "stored"
+    assert p.sink.events[-1]["traffic_source"] == "loadtest"
+    assert p.handle(raw_event()) == "stored"                     # older events: no tag
+    assert p.sink.events[-1]["traffic_source"] is None
+    with pytest.raises(InvalidEvent, match="schema violation"):
+        p.handle(raw_event(traffic_source="whatever"))

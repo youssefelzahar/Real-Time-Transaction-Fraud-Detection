@@ -10,7 +10,8 @@ Listens on loopback only. Config (env): DASHBOARD_PORT (8090), KAFKA_BOOTSTRAP_S
 MONITORING_BASELINE_DIR (monitoring/baselines).
 
 /api/ml serves the ML monitoring section (ML_MONITORING.md) from the state the consumer saves;
-it only reads files and never touches the prediction path.
+/api/drift serves the data drift section (DATA_DRIFT.md) from the drift monitor's report.
+Both only read files and never touch the prediction path.
 """
 import json
 import os
@@ -290,11 +291,56 @@ def ml(window: str = Query("1h", pattern="^(5m|1h|24h)$")):
     if collector.last_kafka and time.time() - collector.last_kafka[0] < 10 and collector.last_kafka[1].get("up"):
         lag = collector.last_kafka[1]["lag"]
     report = monitoring_report(load_state(STORE_DIR / "ml_monitoring_state.json"), DEFAULT_WINDOWS[window],
-                               BASELINE_DIR, lag=lag)
+                               BASELINE_DIR, lag=lag, models_dir=ROOT / "models")
     report["window"] = window
     if report.get("available"):
         for rep in report["series"].values():
             rep["performance"] = collector.performance.get(rep["model_version"])
+    return report
+
+
+DRIFT_INTERVAL_S = float(os.getenv("DRIFT_INTERVAL_S", "60"))
+
+
+def tail_jsonl(path, n=20, max_bytes=256 * 1024):
+    """Last n JSON lines of an append-only file (bad lines skipped)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(size - max_bytes, 0))
+            lines = f.read().split(b"\n")
+    except OSError:
+        return []
+    out = []
+    for ln in reversed(lines):
+        try:
+            out.append(json.loads(ln))
+        except ValueError:
+            continue
+        if len(out) >= n:
+            break
+    return out
+
+
+@app.get("/api/drift")
+def drift():
+    """Latest report of the drift monitor (monitoring/drift_monitor.py) plus recent alerts. Read-only:
+    the dashboard never computes drift itself, so what it shows is what the alerts were based on."""
+    try:
+        report = json.loads((STORE_DIR / "drift_report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"available": False, "reason": "no drift report yet: start the drift monitor "
+                                              "(deploy/start.sh drift or python -m monitoring.drift_monitor)",
+                "recent_alerts": tail_jsonl(STORE_DIR / "drift_alerts.jsonl")}
+    age = None
+    try:
+        age = round(time.time() - datetime.fromisoformat(report["computed_at"]).timestamp(), 1)
+    except (KeyError, ValueError, TypeError):
+        pass
+    report.update({"available": True, "report_age_s": age, "interval_s": DRIFT_INTERVAL_S,
+                   "report_stale": age is None or age > 3 * DRIFT_INTERVAL_S,
+                   "recent_alerts": tail_jsonl(STORE_DIR / "drift_alerts.jsonl")})
     return report
 
 
@@ -306,7 +352,8 @@ def send(sample: str):
     body = {**SAMPLES[sample], "transaction_id": f"demo-{sample}-{int(time.time() * 1000) % 10_000_000}"}
     t0 = time.perf_counter()
     try:
-        r = collector.http.post(NGINX_PUBLIC + "/predict", json=body, timeout=5)
+        r = collector.http.post(NGINX_PUBLIC + "/predict", json=body, timeout=5,
+                               headers={"X-Traffic-Source": "demo"})       # not production traffic
         out = r.json()
         status = r.status_code
     except (httpx.HTTPError, ValueError) as e:

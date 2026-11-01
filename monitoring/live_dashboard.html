@@ -57,6 +57,17 @@
   .ml-grid h3 { font-size: 12px; color: var(--muted); font-weight: 500; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .05em; }
   .bar { height: 14px; border-radius: 3px; display: inline-block; vertical-align: middle; }
   .na { color: var(--muted); font-style: italic; }
+  .st { padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .st-drift_detected { background: rgba(255,93,93,.15); color: var(--bad); }
+  .st-no_significant_drift { background: rgba(60,207,145,.15); color: var(--resp); }
+  .st-insufficient_data { background: rgba(138,153,168,.15); color: var(--muted); }
+  .st-monitoring_error, .st-no_state { background: rgba(245,165,36,.15); color: var(--event); }
+  .drift-note { border-left: 3px solid var(--event); padding: 6px 10px; margin: 8px 0; color: var(--muted); font-size: 13px; }
+  #driftTable td, #driftTable th { font-size: 12.5px; }
+  #driftTable td.reasons { white-space: normal; max-width: 320px; color: var(--muted); }
+  .chip-test { border-style: dashed; color: var(--muted); }
+  .source-note { border-left: 3px solid var(--review); padding: 6px 10px; margin: 6px 0; font-size: 13px; }
+  .dist-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 10px; }
   #ml table td, #ml table th { max-width: 140px; }
 </style>
 </head>
@@ -98,6 +109,7 @@
       <span class="chip" data-w="5m">5 min</span><span class="chip on" data-w="1h">1 hour</span><span class="chip" data-w="24h">24 hours</span>
       <span class="muted">model · policy:</span><span id="mlSeries"></span>
     </div>
+    <div id="mlSourceNote"></div>
     <div class="muted" id="mlFresh">loading…</div>
     <div class="kpis" id="mlKpis" style="margin-top:10px"></div>
     <div class="ml-grid">
@@ -108,6 +120,26 @@
       <div><h3>Transaction-type mix vs training baseline</h3><table id="mlTypes"></table></div>
       <div><h3>Input data quality vs training baseline</h3><table id="mlQuality"></table></div>
       <div><h3>Model performance (needs actual labels)</h3><div id="mlPerf"></div></div>
+    </div>
+  </section>
+  <section class="card" id="drift">
+    <h2>Data drift · production inputs vs training baseline (computed by the drift monitor)</h2>
+    <div class="drift-note">Drift means the input distribution changed compared with the training data. It does not show that
+      fraud detection got worse: that needs actual fraud labels (see "Model performance"). Synthetic load-test traffic drifts by design.</div>
+    <div class="ml-head">
+      <span class="muted">window:</span><span id="driftWindows"></span>
+      <span class="muted">model:</span><span id="driftModels"></span>
+    </div>
+    <div id="driftSourceNote"></div>
+    <div class="muted" id="driftFresh">loading…</div>
+    <div class="kpis" id="driftKpis" style="margin-top:10px"></div>
+    <h3 style="margin-top:14px">Per-feature results</h3>
+    <div style="overflow-x:auto"><table id="driftTable"></table></div>
+    <h3 style="margin-top:14px">Reference (grey) vs production (blue) shares · largest changes</h3>
+    <div class="dist-grid" id="driftDists"></div>
+    <div class="ml-grid">
+      <div><h3>Prediction drift (fraud score vs validation reference) · reported separately</h3><div id="driftPred"></div></div>
+      <div><h3>Alerts</h3><div id="driftAlerts"></div></div>
     </div>
   </section>
 </main>
@@ -357,9 +389,18 @@ function renderML(r) {
   lastML = r;
   const fresh = document.getElementById("mlFresh");
   if (!r.available) { fresh.innerHTML = na(r.reason); return; }
-  const keys = Object.keys(r.series);
-  if (!keys.includes(mlKey)) mlKey = keys[0] || null;
-  document.getElementById("mlSeries").innerHTML = keys.map(k => `<span class="chip ${k === mlKey ? "on" : ""}" data-k="${k}">${k.replace("|", " · ")} (${fmt(r.series[k].n)})</span>`).join(" ") || na("no predictions in this window");
+  const keys = Object.keys(r.series);            // server order: production first
+  if (!keys.includes(mlKey)) mlKey = keys.find(k => r.series[k].traffic_source === "production") || keys[0] || null;
+  const hasProd = keys.some(k => r.series[k].traffic_source === "production");
+  document.getElementById("mlSeries").innerHTML = keys.map(k => {
+    const src = r.series[k].traffic_source;
+    return `<span class="chip ${k === mlKey ? "on" : ""} ${src !== "production" ? "chip-test" : ""}" data-k="${k}">${k.split("|").join(" · ")} (${fmt(r.series[k].n)})${src !== "production" ? " · test traffic" : ""}</span>`;
+  }).join(" ") || na("no predictions in this window");
+  const sel = mlKey && r.series[mlKey];
+  document.getElementById("mlSourceNote").innerHTML = !hasProd
+    ? `<div class="source-note">No production predictions in this window.${keys.length ? " The series shown are test traffic (load tests, demos, tests)." : ""}</div>`
+    : sel && sel.traffic_source !== "production"
+      ? `<div class="source-note">Showing <b>${esc(sel.traffic_source)}</b> traffic, not production.</div>` : "";
   const f = r.freshness;
   const stale = f.stale === true ? `<span class="err"> · STALE: events waiting in Kafka but state not updated for ${fmt(f.state_age_s)} s</span>` : f.stale == null ? `<span class="warn"> · Kafka lag unknown</span>` : "";
   const gaps = r.counters.offset_gap_not_aggregated ? `<span class="warn"> · ${fmt(r.counters.offset_gap_not_aggregated)} events not aggregated (state lost or behind)</span>` : "";
@@ -444,6 +485,118 @@ async function pollML() {
   catch (e) { document.getElementById("mlFresh").innerHTML = `<span class="err">ML monitoring unavailable: ${e}</span>`; }
 }
 (function loopML() { pollML(); setTimeout(loopML, 5000); })();
+
+// ---- Data drift (GET /api/drift every 10 s) ----------------------------------------------------
+let driftWin = null, driftModel = null, lastDrift = null;
+const esc = v => String(v ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const st = s => `<span class="st st-${esc(s)}">${esc((s || "").replace(/_/g, " "))}</span>`;
+const pv = p => p == null ? "–" : p < 1e-4 ? "<1e-4" : (+p).toFixed(4);
+const age = s => s == null ? "–" : s < 120 ? `${Math.round(s)} s` : s < 7200 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(1)} h`;
+
+function chips(id, keys, current, onPick) {
+  const host = document.getElementById(id);
+  host.innerHTML = keys.map(k => `<span class="chip ${k === current ? "on" : ""}" data-k="${esc(k)}">${esc(k)}</span>`).join(" ");
+  host.onclick = ev => { const c = ev.target.closest(".chip"); if (c) onPick(c.dataset.k); };
+}
+
+function distChart(r) {
+  const g = r.groups; if (!g) return "";
+  const ref = g.reference_share || [], prod = g.production_share || [], n = ref.length;
+  const labels = g.categories || (g.edges_bins ? ["below range", ...g.edges_bins.map(b => "bin ≤" + b), "above range"] : []);
+  const W = 300, H = 120, bw = W / n, max = Math.max(...ref, ...prod, 1e-9);
+  let bars = "";
+  for (let i = 0; i < n; i++) {
+    const hr = (ref[i] || 0) / max * (H - 20), hp = (prod[i] || 0) / max * (H - 20);
+    bars += `<rect x="${i * bw + 1}" y="${H - 14 - hr}" width="${Math.max(bw / 2 - 1.5, 1)}" height="${hr}" fill="#5c6b7a"><title>${esc(labels[i])}: reference ${pct(ref[i])}</title></rect>`;
+    bars += `<rect x="${i * bw + bw / 2}" y="${H - 14 - hp}" width="${Math.max(bw / 2 - 1.5, 1)}" height="${hp}" fill="var(--req)"><title>${esc(labels[i])}: production ${pct(prod[i])}</title></rect>`;
+    if (g.categories) bars += `<text x="${i * bw + bw / 2}" y="${H - 2}" fill="#8a99a8" font-size="9" text-anchor="middle">${esc(String(labels[i]).slice(0, 8))}</text>`;
+  }
+  const axis = g.categories ? "" : `<text x="2" y="${H - 2}" fill="#8a99a8" font-size="9">low</text><text x="${W - 2}" y="${H - 2}" fill="#8a99a8" font-size="9" text-anchor="end">high (log bins)</text>`;
+  return `<div><div class="muted" style="font-size:12px">${esc(r.feature)} · PSI ${num(r.psi)} · ${st(r.status)}</div>
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${bars}${axis}</svg></div>`;
+}
+
+function renderDrift(d) {
+  lastDrift = d;
+  const fresh = document.getElementById("driftFresh");
+  const recent = d.recent_alerts || [];
+  if (!d.available || d.status === "no_state" || d.status === "monitoring_error") {
+    fresh.innerHTML = d.available ? `${st(d.status)} ${esc(d.reason || "")} · last successful calculation: ${esc(d.last_successful_at || "never")}` : na(esc(d.reason));
+    ["driftKpis", "driftTable", "driftDists", "driftPred"].forEach(id => document.getElementById(id).innerHTML = "");
+    renderAlerts(d.active_alerts || [], recent);
+    return;
+  }
+  const wins = Object.keys(d.windows || {});
+  if (!wins.includes(driftWin)) driftWin = wins[0];
+  chips("driftWindows", wins, driftWin, k => { driftWin = k; renderDrift(lastDrift); });
+  const w = d.windows[driftWin], models = Object.keys(w.models);    // server order: production first
+  const isProd = k => (w.models[k]?.traffic_source || "production") === "production";
+  if (!models.includes(driftModel)) driftModel = models.find(isProd) || models[0];
+  chips("driftModels", models, driftModel, k => { driftModel = k; renderDrift(lastDrift); });
+  document.querySelectorAll("#driftModels .chip").forEach(c => { if (!isProd(c.dataset.k)) { c.classList.add("chip-test"); c.textContent += " · test traffic"; } });
+  document.getElementById("driftSourceNote").innerHTML = !models.some(isProd)
+    ? `<div class="source-note">No production predictions in this window: there is nothing to judge for production drift.${models.length ? " The series shown are test traffic, monitored separately and never alerted." : ""}</div>`
+    : driftModel && !isProd(driftModel)
+      ? `<div class="source-note">Showing <b>${esc(w.models[driftModel].traffic_source)}</b> traffic, not production. It is monitored separately and never raises alerts.</div>` : "";
+  const f = d.freshness || {};
+  fresh.innerHTML = `calculated ${esc(d.computed_at)} in ${d.duration_ms} ms (${age(d.report_age_s)} ago${d.report_stale ? ` · <span class="err">drift monitor not updating</span>` : ""})
+    · window ${esc(w.start)} → ${esc(w.end)} (${esc(w.resolution)}${w.effective_start && w.effective_start !== w.start ? `; data from ${esc(w.effective_start)}` : ""})
+    · consumer state ${age(f.state_age_s)} old${f.stale ? ` <span class="err">STALE</span>` : ""} · Kafka lag ${f.kafka_lag ?? "unknown"}
+    · newest prediction ${age(f.newest_prediction_age_s)} ago
+    · traffic by source: ${Object.entries(w.traffic_by_source || {}).map(([k, v]) => `${esc(k)} ${v.toLocaleString()}`).join(", ") || "–"}
+    (alerts only for: ${esc((d.config?.alerts?.traffic_sources || ["production"]).join(", "))})`;
+  const m = w.models[driftModel];
+  if (!m) {
+    document.getElementById("driftKpis").innerHTML = na("no predictions from any model in this window");
+    ["driftTable", "driftDists", "driftPred"].forEach(id => document.getElementById(id).innerHTML = "");
+    renderAlerts(d.active_alerts || [], recent);
+    return;
+  }
+  const s = m.summary;
+  const kp = [
+    ["overall input drift", st(s.status)],
+    ["features monitored", s.features_monitored ?? "–"],
+    ["with enough data", s.features_with_sufficient_data ?? "–"],
+    ["features drifting", s.features_drifting ?? "–"],
+    ["production samples", s.production_n?.toLocaleString() ?? "–"],
+    ["type-mix TVD", num(s.type_mix_tvd)],
+    ["baseline", esc(m.baseline_version || "none")],
+    ["feature pipeline", esc(m.feature_pipeline?.id || "–")],
+  ];
+  document.getElementById("driftKpis").innerHTML = kp.map(([l, v]) => `<div class="kpi"><div class="v" style="font-size:16px">${v}</div><div class="l">${l}</div></div>`).join("")
+    + (s.reason ? `<div class="muted">${esc(s.reason)}</div>` : "")
+    + (s.largest_changes?.length ? `<div class="muted" style="grid-column:1/-1">largest changes: ${s.largest_changes.map(x => `${esc(x.feature)} (PSI ${num(x.psi)})`).join(", ")} · ${esc(s.note || "")}</div>` : "");
+  const head = `<tr><th>feature</th><th>type</th><th>status</th><th>severity</th><th>PSI</th><th>threshold</th><th>χ² Holm p</th><th>KS dist</th><th>ref n</th><th>prod n</th><th>missing ref / prod</th><th>unknown</th><th>why</th></tr>`;
+  const rows = m.features.map(r => `<tr><td>${esc(r.feature)}${r.critical ? " ★" : ""}</td><td>${esc(r.type)}</td><td>${st(r.status)}</td><td>${esc(r.severity || "–")}</td>
+    <td>${num(r.psi)}</td><td>${r.threshold.moderate} / ${r.threshold.substantial}</td>
+    <td>${r.test?.applicable ? pv(r.test.p_holm) : na(r.test ? "n/a" : "–")}</td><td>${num(r.ks_distance)}</td>
+    <td>${r.reference_n.toLocaleString()}</td><td>${r.production_n.toLocaleString()}</td>
+    <td>${pct(r.missing_rate.reference)} / ${pct(r.missing_rate.production)}${r.non_finite_rate && r.non_finite_rate.n ? `<br><span class="err">non-finite ${pct(r.non_finite_rate.production)}</span>` : ""}</td>
+    <td>${r.unknown_rate ? pct(r.unknown_rate.production) : "–"}</td><td class="reasons">${esc((r.reasons || []).join("; "))}</td></tr>`).join("");
+  document.getElementById("driftTable").innerHTML = head + (rows || `<tr><td colspan="13">${na("no feature results")}</td></tr>`);
+  const top = m.features.filter(r => r.psi != null).sort((a, b) => b.psi - a.psi).slice(0, 3);
+  document.getElementById("driftDists").innerHTML = top.map(distChart).join("") || na("not enough data for distributions");
+  const p = m.prediction;
+  document.getElementById("driftPred").innerHTML = !p ? na("not computed") :
+    `${st(p.status)} PSI ${num(p.psi)} · n ${p.production_n ?? "–"} vs reference ${p.reference_n?.toLocaleString() ?? "–"} (${esc(p.reference)})
+     ${p.test?.applicable ? ` · χ² p ${pv(p.test.p_value)}` : ""}${(p.reasons || []).length ? `<div class="muted">${esc(p.reasons.join("; "))}</div>` : ""}
+     <div class="muted" style="margin-top:4px">The score distribution can move because inputs moved or because model behaviour changed; it is not an accuracy measure.</div>`;
+  renderAlerts(d.active_alerts || [], recent);
+}
+
+function renderAlerts(active, recent) {
+  const a = active.map(x => `<div><span class="st ${x.ack ? "st-insufficient_data" : "st-drift_detected"}">${esc(x.rule)}</span> ${esc(x.details?.feature || "")} ${esc(x.details?.window || "")}
+    · score ${num(x.details?.drift_score)} · n ${x.details?.sample_count ?? "–"} · since ${esc(x.since)}
+    ${x.ack ? `<div class="muted">acknowledged by ${esc(x.ack.by)} until ${esc(x.ack.until)}: ${esc(x.ack.reason)}</div>` : ""}</div>`).join("");
+  const r = recent.slice(0, 8).map(x => `<div class="muted">${esc(x.at)} ${esc(x.event)} ${esc(x.rule)} ${esc(x.feature || "")} ${esc(x.window || "")}</div>`).join("");
+  document.getElementById("driftAlerts").innerHTML = (a || na("no active alerts")) + (r ? `<div style="margin-top:6px">${r}</div>` : "");
+}
+
+async function pollDrift() {
+  try { renderDrift(await (await fetch("/api/drift", { cache: "no-store" })).json()); }
+  catch (e) { document.getElementById("driftFresh").innerHTML = `<span class="err">drift section unavailable: ${esc(e)}</span>`; }
+}
+(function loopDrift() { pollDrift(); setTimeout(loopDrift, 10000); })();
 
 document.querySelectorAll("button[data-s]").forEach(b => b.addEventListener("click", async () => {
   const out = document.getElementById("sendOut");

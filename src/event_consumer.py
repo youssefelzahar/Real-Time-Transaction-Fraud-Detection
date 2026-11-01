@@ -64,6 +64,8 @@ class PredictionEvent(BaseModel):
     feature_bins: Optional[dict[str, Optional[int]]] = None
     feature_flags: Optional[dict[str, Optional[int]]] = None
     non_finite_features: Optional[list[str]] = None
+    # Traffic source tag (X-Traffic-Source): optional, absent in older events = production.
+    traffic_source: Optional[Literal["production", "loadtest", "test", "demo"]] = None
 
 
 class InvalidEvent(Exception):

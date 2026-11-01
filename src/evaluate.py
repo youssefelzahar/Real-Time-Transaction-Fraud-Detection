@@ -36,10 +36,14 @@ def choose_threshold(y_val, proba_val, cost_fn=COST_FN, cost_fp=COST_FP):
 def evaluate_at_threshold(y_true, y_proba, threshold, cost_fn=COST_FN, cost_fp=COST_FP):
     tp, fp, fn, tn = confusion_counts(y_true, y_proba, threshold)
     cost = business_cost(fn, fp, cost_fn, cost_fp)
+    # Accuracy is reported for completeness only: with ~0.1% fraud, "approve everything"
+    # scores 99.9%. Model selection uses cost, recall/precision and PR-AUC.
     return {
         "threshold": threshold,
+        "accuracy": (tp + tn) / (tp + fp + fn + tn) if tp + fp + fn + tn else 0.0,
         "precision": tp / (tp + fp) if tp + fp else 0.0,
         "recall": tp / (tp + fn) if tp + fn else 0.0,
+        "f1": 2 * tp / (2 * tp + fp + fn) if tp + fp + fn else 0.0,
         "pr_auc": float(average_precision_score(y_true, y_proba)),
         "fpr": fp / (fp + tn) if fp + tn else 0.0,
         "TP": tp, "FP": fp, "FN": fn, "TN": tn,

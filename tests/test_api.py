@@ -209,7 +209,8 @@ def events_client(model_dir):
 
 
 def test_kafka_disabled_by_default(client):
-    assert client.get("/metrics/events").json() == {"kafka_enabled": False}
+    m = client.get("/metrics/events").json()
+    assert m["kafka_enabled"] is False and set(m) == {"kafka_enabled", "traffic_source_invalid"}
     assert client.post("/predict", json=payload()).status_code == 200
 
 
@@ -230,6 +231,20 @@ def test_event_published_and_response_unchanged(events_client, monkeypatch, scor
         assert event[k] == body[k]
     assert event["would_decline"] is would_decline and event["transaction_type"] == "TRANSFER"
     assert "sender_id" not in event and "amount" not in event
+
+
+def test_traffic_source_header_tags_the_event_not_the_response(events_client):
+    import api.main as api_main
+    client, publisher = events_client
+    before = api_main.traffic_source_invalid
+    plain = client.post("/predict", json=payload()).json()
+    tagged = client.post("/predict", json=payload(), headers={"X-Traffic-Source": "LoadTest "}).json()
+    bogus = client.post("/predict", json=payload(), headers={"X-Traffic-Source": "ignore-me"}).json()
+    assert [e["traffic_source"] for e in publisher.events] == ["production", "loadtest", "production"]
+    assert plain == tagged == bogus                       # prediction and response never change
+    assert set(tagged) == RESPONSE_FIELDS
+    assert api_main.traffic_source_invalid == before + 1  # invalid values are counted, not trusted
+    assert client.get("/metrics/events").json()["traffic_source_invalid"] == before + 1
 
 
 def test_publisher_failure_never_breaks_prediction(model_dir):

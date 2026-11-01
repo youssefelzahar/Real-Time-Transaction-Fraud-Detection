@@ -452,9 +452,12 @@ def dash(tmp_path, monkeypatch):
     store, baselines = tmp_path / "store", tmp_path / "baselines"
     store.mkdir()
     (baselines / "e7_v1").mkdir(parents=True)
-    (baselines / "e7_v1" / "bl-e7_v1-1.json").write_text(json.dumps(
-        {"baseline_version": "bl-e7_v1-1", "transaction_types": {"PAYMENT": 1.0}, "bin_range": {},
-         "bin_p999": {}, "flags": {}, "features": {}}))
+    from tests.test_drift_detection import baseline as valid_baseline
+    b = valid_baseline("e7_v1")       # the dashboard only shows baselines that pass validation
+    b["baseline_version"] = "bl-e7_v1-1"
+    b["feature_names"] = json.loads((d.ROOT / "models/e7_v1/metadata.json").read_text())["feature_names"] \
+        if (d.ROOT / "models/e7_v1/metadata.json").exists() else b["feature_names"]
+    (baselines / "e7_v1" / "bl-e7_v1-1.json").write_text(json.dumps(b))
     monkeypatch.setattr(d, "STORE_DIR", store)
     monkeypatch.setattr(d, "BASELINE_DIR", baselines)
     monkeypatch.setattr(d.collector, "performance", d.PerformanceCache(store))
@@ -495,3 +498,20 @@ def test_dashboard_ml_freshness_and_insufficient_data(dash):
     d.collector.last_kafka = None
     assert c.get("/api/ml").json()["freshness"]["stale"] is None       # lag unknown
     assert c.get("/api/ml?window=7d").status_code == 422
+
+
+def test_traffic_sources_are_separate_series_and_old_keys_are_production():
+    a = agg()
+    tagged = event()
+    tagged["traffic_source"] = "loadtest"
+    a.observe(event())
+    a.observe(tagged)
+    untagged_old = event()                   # event written before the tag existed
+    a.observe(untagged_old)
+    merged, _ = a.window(60)
+    assert merged["e7_v1|dp-1"]["n"] == 2 and merged["e7_v1|dp-1|loadtest"]["n"] == 1
+    assert mm.series_parts("e7_v1|dp-1") == ("e7_v1", "dp-1", "production")
+    assert mm.series_parts("e7_v1|dp-1|demo") == ("e7_v1", "dp-1", "demo")
+    rep = mm.monitoring_report(a, 60, "/nonexistent", now=NOW, min_events=1)
+    assert rep["series"]["e7_v1|dp-1|loadtest"]["traffic_source"] == "loadtest"
+    assert rep["series"]["e7_v1|dp-1"]["traffic_source"] == "production"

@@ -201,6 +201,17 @@ wrk -t2 -c8 -d120s -s tests/wrk_paced.lua http://127.0.0.1:8080 -- 20
 
 It shows client → Nginx → 6 instances → Kafka → consumer → event store with live rates, instances or broker going down (red dashed), Kafka lag, decision totals, the latest stored events, and buttons that send one sample transaction through Nginx. It only reads existing metrics and listens on 127.0.0.1.
 
+### Data drift monitor
+
+```bash
+export KAFKA_BOOTSTRAP_SERVERS=127.0.0.1:9092
+deploy/start.sh drift                        # every 60 s; reads the consumer's monitoring state
+python -m monitoring.drift_monitor --once    # one calculation, printed
+deploy/stop.sh drift
+```
+
+Results appear in the dashboard's "Data drift" section, alerts in `~/.local/share/nilepay-events/drift_alerts.jsonl`. Load-test traffic is synthetic, so it reports drift. Details: [DATA_DRIFT.md](DATA_DRIFT.md).
+
 ## 9. Benchmark only the scoring code
 
 ```bash

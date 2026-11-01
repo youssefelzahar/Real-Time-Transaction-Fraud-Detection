@@ -1,0 +1,611 @@
+{
+  "source": "notebooks/01_eda_and_modeling.ipynb cells 19, 26, 30-34",
+  "experiments": {
+    "E1": {
+      "description": "post-tx balances (leaky reference)",
+      "features": [
+        "amount",
+        "oldbalanceOrg",
+        "oldbalanceDest",
+        "newbalanceOrig",
+        "newbalanceDest",
+        "hour",
+        "type_CASH_IN",
+        "type_CASH_OUT",
+        "type_DEBIT",
+        "type_PAYMENT",
+        "type_TRANSFER"
+      ],
+      "threshold": 0.36000000000000004,
+      "val_cost": 3143,
+      "validation": {
+        "threshold": 0.36000000000000004,
+        "accuracy": 0.9981579219541855,
+        "precision": 0.2478330658105939,
+        "recall": 0.9897435897435898,
+        "f1": 0.39640564826700897,
+        "pr_auc": 0.9358873547943684,
+        "fpr": 0.001836932456079831,
+        "TP": 772,
+        "FP": 2343,
+        "FN": 8,
+        "TN": 1273153,
+        "cost": 3143,
+        "cost_per_fraud": 4.029487179487179,
+        "n": 1276276,
+        "fraud": 780
+      },
+      "test": {
+        "threshold": 0.36000000000000004,
+        "accuracy": 0.9980131779643655,
+        "precision": 0.6257824143070044,
+        "recall": 0.9861437294504463,
+        "f1": 0.7656819839533188,
+        "pr_auc": 0.9762905977888895,
+        "fpr": 0.0019476213191236868,
+        "TP": 4199,
+        "FP": 2511,
+        "FN": 59,
+        "TN": 1286754,
+        "cost": 8411,
+        "cost_per_fraud": 1.9753405354626585,
+        "n": 1293523,
+        "fraud": 4258
+      },
+      "gain_top5": {
+        "newbalanceOrig": 54263.7734375,
+        "type_PAYMENT": 15171.19140625,
+        "oldbalanceOrg": 5964.447265625,
+        "type_TRANSFER": 5832.36669921875,
+        "amount": 2479.1318359375
+      },
+      "vs_notebook": {
+        "threshold": {
+          "recorded": 0.36,
+          "reproduced": 0.36000000000000004,
+          "match": true
+        },
+        "precision": {
+          "recorded": 0.6258,
+          "reproduced": 0.6257824143070044,
+          "match": true
+        },
+        "recall": {
+          "recorded": 0.9861,
+          "reproduced": 0.9861437294504463,
+          "match": true
+        },
+        "pr_auc": {
+          "recorded": 0.9763,
+          "reproduced": 0.9762905977888895,
+          "match": true
+        },
+        "fpr": {
+          "recorded": 0.0019,
+          "reproduced": 0.0019476213191236868,
+          "match": true
+        },
+        "TP": {
+          "recorded": 4199.0,
+          "reproduced": 4199,
+          "match": true
+        },
+        "FP": {
+          "recorded": 2511.0,
+          "reproduced": 2511,
+          "match": true
+        },
+        "FN": {
+          "recorded": 59.0,
+          "reproduced": 59,
+          "match": true
+        },
+        "TN": {
+          "recorded": 1286754.0,
+          "reproduced": 1286754,
+          "match": true
+        },
+        "cost": {
+          "recorded": 8411.0,
+          "reproduced": 8411,
+          "match": true
+        },
+        "val_cost": {
+          "recorded": 3143.0,
+          "reproduced": 3143,
+          "match": true
+        }
+      }
+    },
+    "E2": {
+      "description": "pre-tx raw",
+      "features": [
+        "amount",
+        "oldbalanceOrg",
+        "oldbalanceDest",
+        "hour",
+        "type_CASH_IN",
+        "type_CASH_OUT",
+        "type_DEBIT",
+        "type_PAYMENT",
+        "type_TRANSFER"
+      ],
+      "threshold": 0.67,
+      "val_cost": 6584,
+      "validation": {
+        "threshold": 0.67,
+        "accuracy": 0.9967029075215705,
+        "precision": 0.15303643724696356,
+        "recall": 0.9692307692307692,
+        "f1": 0.26433566433566436,
+        "pr_auc": 0.8544811034576968,
+        "fpr": 0.0032802925293376065,
+        "TP": 756,
+        "FP": 4184,
+        "FN": 24,
+        "TN": 1271312,
+        "cost": 6584,
+        "cost_per_fraud": 8.441025641025641,
+        "n": 1276276,
+        "fraud": 780
+      },
+      "test": {
+        "threshold": 0.67,
+        "accuracy": 0.9965203556488752,
+        "precision": 0.48562300319488816,
+        "recall": 0.9638327853452325,
+        "f1": 0.6458415296246754,
+        "pr_auc": 0.9292480615064849,
+        "fpr": 0.0033716885202033716,
+        "TP": 4104,
+        "FP": 4347,
+        "FN": 154,
+        "TN": 1284918,
+        "cost": 19747,
+        "cost_per_fraud": 4.637623297322687,
+        "n": 1293523,
+        "fraud": 4258
+      },
+      "gain_top5": {
+        "type_CASH_IN": 81759.15625,
+        "type_PAYMENT": 24606.873046875,
+        "type_TRANSFER": 4730.328125,
+        "oldbalanceOrg": 4433.41162109375,
+        "amount": 4275.169921875
+      },
+      "vs_notebook": {
+        "threshold": {
+          "recorded": 0.67,
+          "reproduced": 0.67,
+          "match": true
+        },
+        "precision": {
+          "recorded": 0.4856,
+          "reproduced": 0.48562300319488816,
+          "match": true
+        },
+        "recall": {
+          "recorded": 0.9638,
+          "reproduced": 0.9638327853452325,
+          "match": true
+        },
+        "pr_auc": {
+          "recorded": 0.9292,
+          "reproduced": 0.9292480615064849,
+          "match": true
+        },
+        "fpr": {
+          "recorded": 0.0034,
+          "reproduced": 0.0033716885202033716,
+          "match": true
+        },
+        "TP": {
+          "recorded": 4104.0,
+          "reproduced": 4104,
+          "match": true
+        },
+        "FP": {
+          "recorded": 4347.0,
+          "reproduced": 4347,
+          "match": true
+        },
+        "FN": {
+          "recorded": 154.0,
+          "reproduced": 154,
+          "match": true
+        },
+        "TN": {
+          "recorded": 1284918.0,
+          "reproduced": 1284918,
+          "match": true
+        },
+        "cost": {
+          "recorded": 19747.0,
+          "reproduced": 19747,
+          "match": true
+        },
+        "val_cost": {
+          "recorded": 6584.0,
+          "reproduced": 6584,
+          "match": true
+        }
+      }
+    },
+    "E3": {
+      "description": "pre-tx log1p",
+      "features": [
+        "amount_log",
+        "oldbalanceOrg_log",
+        "oldbalanceDest_log",
+        "hour",
+        "type_CASH_IN",
+        "type_CASH_OUT",
+        "type_DEBIT",
+        "type_PAYMENT",
+        "type_TRANSFER"
+      ],
+      "threshold": 0.79,
+      "val_cost": 6596,
+      "validation": {
+        "threshold": 0.79,
+        "accuracy": 0.9975467688807124,
+        "precision": 0.1939599062744077,
+        "recall": 0.9551282051282052,
+        "f1": 0.32244103008006925,
+        "pr_auc": 0.8537919492389293,
+        "fpr": 0.0024272910303129135,
+        "TP": 745,
+        "FP": 3096,
+        "FN": 35,
+        "TN": 1272400,
+        "cost": 6596,
+        "cost_per_fraud": 8.456410256410257,
+        "n": 1276276,
+        "fraud": 780
+      },
+      "test": {
+        "threshold": 0.79,
+        "accuracy": 0.9973320922782201,
+        "precision": 0.555678211673796,
+        "recall": 0.9457491780178487,
+        "f1": 0.7000434593654933,
+        "pr_auc": 0.9312403256424322,
+        "fpr": 0.0024975470520024975,
+        "TP": 4027,
+        "FP": 3220,
+        "FN": 231,
+        "TN": 1286045,
+        "cost": 26320,
+        "cost_per_fraud": 6.181305777360263,
+        "n": 1293523,
+        "fraud": 4258
+      },
+      "gain_top5": {
+        "type_CASH_IN": 75757.6484375,
+        "type_PAYMENT": 25176.8359375,
+        "oldbalanceOrg_log": 4475.53564453125,
+        "amount_log": 4134.94677734375,
+        "type_TRANSFER": 4066.1103515625
+      },
+      "vs_notebook": {
+        "threshold": {
+          "recorded": 0.79,
+          "reproduced": 0.79,
+          "match": true
+        },
+        "precision": {
+          "recorded": 0.5557,
+          "reproduced": 0.555678211673796,
+          "match": true
+        },
+        "recall": {
+          "recorded": 0.9457,
+          "reproduced": 0.9457491780178487,
+          "match": true
+        },
+        "pr_auc": {
+          "recorded": 0.9312,
+          "reproduced": 0.9312403256424322,
+          "match": true
+        },
+        "fpr": {
+          "recorded": 0.0025,
+          "reproduced": 0.0024975470520024975,
+          "match": true
+        },
+        "TP": {
+          "recorded": 4027.0,
+          "reproduced": 4027,
+          "match": true
+        },
+        "FP": {
+          "recorded": 3220.0,
+          "reproduced": 3220,
+          "match": true
+        },
+        "FN": {
+          "recorded": 231.0,
+          "reproduced": 231,
+          "match": true
+        },
+        "TN": {
+          "recorded": 1286045.0,
+          "reproduced": 1286045,
+          "match": true
+        },
+        "cost": {
+          "recorded": 26320.0,
+          "reproduced": 26320,
+          "match": true
+        },
+        "val_cost": {
+          "recorded": 6596.0,
+          "reproduced": 6596,
+          "match": true
+        }
+      }
+    },
+    "E4": {
+      "description": "pre-tx engineered",
+      "features": [
+        "amount",
+        "oldbalanceOrg",
+        "oldbalanceDest",
+        "amt_to_orig_bal",
+        "drains_orig",
+        "exceeds_orig_bal",
+        "orig_bal_zero",
+        "dest_bal_zero",
+        "amt_to_dest_bal",
+        "is_max_amount",
+        "amt_vs_type_median",
+        "hour",
+        "type_CASH_IN",
+        "type_CASH_OUT",
+        "type_DEBIT",
+        "type_PAYMENT",
+        "type_TRANSFER"
+      ],
+      "threshold": 0.97,
+      "val_cost": 0,
+      "validation": {
+        "threshold": 0.97,
+        "accuracy": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "pr_auc": 1.0,
+        "fpr": 0.0,
+        "TP": 780,
+        "FP": 0,
+        "FN": 0,
+        "TN": 1275496,
+        "cost": 0,
+        "cost_per_fraud": 0.0,
+        "n": 1276276,
+        "fraud": 780
+      },
+      "test": {
+        "threshold": 0.97,
+        "accuracy": 0.9999907230099504,
+        "precision": 0.9995294117647059,
+        "recall": 0.9976514795678723,
+        "f1": 0.998589562764457,
+        "pr_auc": 0.9997900986417916,
+        "fpr": 1.5512714608711165e-06,
+        "TP": 4248,
+        "FP": 2,
+        "FN": 10,
+        "TN": 1289263,
+        "cost": 1002,
+        "cost_per_fraud": 0.2353217472992015,
+        "n": 1293523,
+        "fraud": 4258
+      },
+      "gain_top5": {
+        "drains_orig": 191092.78125,
+        "is_max_amount": 16645.78125,
+        "amt_to_orig_bal": 923.6657104492188,
+        "type_CASH_IN": 882.4588623046875,
+        "type_CASH_OUT": 783.6983032226562
+      },
+      "vs_notebook": {
+        "threshold": {
+          "recorded": 0.97,
+          "reproduced": 0.97,
+          "match": true
+        },
+        "precision": {
+          "recorded": 0.9995,
+          "reproduced": 0.9995294117647059,
+          "match": true
+        },
+        "recall": {
+          "recorded": 0.9977,
+          "reproduced": 0.9976514795678723,
+          "match": true
+        },
+        "pr_auc": {
+          "recorded": 0.9998,
+          "reproduced": 0.9997900986417916,
+          "match": true
+        },
+        "fpr": {
+          "recorded": 0.0,
+          "reproduced": 1.5512714608711165e-06,
+          "match": true
+        },
+        "TP": {
+          "recorded": 4248.0,
+          "reproduced": 4248,
+          "match": true
+        },
+        "FP": {
+          "recorded": 2.0,
+          "reproduced": 2,
+          "match": true
+        },
+        "FN": {
+          "recorded": 10.0,
+          "reproduced": 10,
+          "match": true
+        },
+        "TN": {
+          "recorded": 1289263.0,
+          "reproduced": 1289263,
+          "match": true
+        },
+        "cost": {
+          "recorded": 1002.0,
+          "reproduced": 1002,
+          "match": true
+        },
+        "val_cost": {
+          "recorded": 0.0,
+          "reproduced": 0,
+          "match": true
+        }
+      },
+      "single_feature_pr_auc_val_top5": {
+        "amt_to_orig_bal": 0.9923952093950041,
+        "drains_orig": 0.9910311257327107,
+        "hour": 0.23189871163685052,
+        "amt_vs_type_median": 0.0031837672349594123,
+        "amount": 0.0030849421556003887
+      }
+    },
+    "E5": {
+      "description": "engineered without drain signal",
+      "features": [
+        "amount",
+        "oldbalanceOrg",
+        "oldbalanceDest",
+        "exceeds_orig_bal",
+        "orig_bal_zero",
+        "dest_bal_zero",
+        "amt_to_dest_bal",
+        "is_max_amount",
+        "amt_vs_type_median",
+        "hour",
+        "type_CASH_IN",
+        "type_CASH_OUT",
+        "type_DEBIT",
+        "type_PAYMENT",
+        "type_TRANSFER"
+      ],
+      "threshold": 0.53,
+      "val_cost": 2977,
+      "validation": {
+        "threshold": 0.53,
+        "accuracy": 0.9986758350074749,
+        "precision": 0.31382978723404253,
+        "recall": 0.9833333333333333,
+        "f1": 0.47580645161290325,
+        "pr_auc": 0.9200992663063845,
+        "fpr": 0.0013147826414194948,
+        "TP": 767,
+        "FP": 1677,
+        "FN": 13,
+        "TN": 1273819,
+        "cost": 2977,
+        "cost_per_fraud": 3.816666666666667,
+        "n": 1276276,
+        "fraud": 780
+      },
+      "test": {
+        "threshold": 0.53,
+        "accuracy": 0.9985628396248076,
+        "precision": 0.7012921631146165,
+        "recall": 0.9814466885861907,
+        "f1": 0.8180483507879025,
+        "pr_auc": 0.9711155215050782,
+        "fpr": 0.0013806316001752936,
+        "TP": 4179,
+        "FP": 1780,
+        "FN": 79,
+        "TN": 1287485,
+        "cost": 9680,
+        "cost_per_fraud": 2.2733677782996713,
+        "n": 1293523,
+        "fraud": 4258
+      },
+      "gain_top5": {
+        "type_CASH_IN": 192367.140625,
+        "type_PAYMENT": 159665.390625,
+        "exceeds_orig_bal": 49568.09375,
+        "type_CASH_OUT": 4743.6845703125,
+        "type_TRANSFER": 3555.384521484375
+      },
+      "vs_notebook": {
+        "threshold": {
+          "recorded": 0.53,
+          "reproduced": 0.53,
+          "match": true
+        },
+        "precision": {
+          "recorded": 0.7013,
+          "reproduced": 0.7012921631146165,
+          "match": true
+        },
+        "recall": {
+          "recorded": 0.9814,
+          "reproduced": 0.9814466885861907,
+          "match": true
+        },
+        "pr_auc": {
+          "recorded": 0.9711,
+          "reproduced": 0.9711155215050782,
+          "match": true
+        },
+        "fpr": {
+          "recorded": 0.0014,
+          "reproduced": 0.0013806316001752936,
+          "match": true
+        },
+        "TP": {
+          "recorded": 4179.0,
+          "reproduced": 4179,
+          "match": true
+        },
+        "FP": {
+          "recorded": 1780.0,
+          "reproduced": 1780,
+          "match": true
+        },
+        "FN": {
+          "recorded": 79.0,
+          "reproduced": 79,
+          "match": true
+        },
+        "TN": {
+          "recorded": 1287485.0,
+          "reproduced": 1287485,
+          "match": true
+        },
+        "cost": {
+          "recorded": 9680.0,
+          "reproduced": 9680,
+          "match": true
+        },
+        "val_cost": {
+          "recorded": 2977.0,
+          "reproduced": 2977,
+          "match": true
+        }
+      }
+    }
+  },
+  "controls": {
+    "notebook_E5_code_equals_models_e5_v1": {
+      "val_identical": true,
+      "test_identical": true,
+      "max_abs_diff": 0.0
+    },
+    "src_train_E7_refit_equals_models_e7_v1": {
+      "val_identical": true,
+      "test_identical": true,
+      "max_abs_diff": 0.0,
+      "threshold": 0.54
+    }
+  }
+}

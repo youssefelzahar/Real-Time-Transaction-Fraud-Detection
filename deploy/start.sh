@@ -6,11 +6,12 @@
 #   deploy/start.sh 3          # only instance 3 (e.g. restart after a failure)
 #   deploy/start.sh nginx
 #   deploy/start.sh consumer   # Kafka event consumer (needs KAFKA_BOOTSTRAP_SERVERS; not part of `all`)
+#   deploy/start.sh drift      # data drift monitor (reads the consumer's state; not part of `all`)
 # Config (env): MODEL_DIR (default models/e7_v1), WORKERS_PER_INSTANCE (default 1),
 #   ACCOUNT_SNAPSHOT, LOG_LEVEL (default warning; `info` logs every request),
 #   TIMING_LOG (default 0; 1 prints timings), DECISION_POLICY (default config/decision_policy.json),
 #   CPUS_INSTANCES (taskset CPU list for all instances, e.g. 0-7; or one list per
-#   instance separated by spaces, e.g. "0 1 2 3 4 5"), CPUS_NGINX, CPUS_CONSUMER. Empty = no pinning.
+#   instance separated by spaces, e.g. "0 1 2 3 4 5"), CPUS_NGINX, CPUS_CONSUMER, CPUS_DRIFT. Empty = no pinning.
 #   KAFKA_BOOTSTRAP_SERVERS (unset = no event publishing) and the other KAFKA_* settings
 #   in KAFKA_EVENTS.md are passed through to the instances and the consumer.
 set -euo pipefail
@@ -84,14 +85,24 @@ start_consumer() {
         || { echo "  consumer exited, see deploy/run/consumer.log" >&2; return 1; }
 }
 
+start_drift() {
+    if running "$RUN/drift.pid"; then echo "  drift monitor already running"; return 0; fi
+    $(pin_prefix "${CPUS_DRIFT:-}") "$PYTHON" -m monitoring.drift_monitor >> "$RUN/drift.log" 2>&1 &
+    echo $! > "$RUN/drift.pid"
+    sleep 2
+    running "$RUN/drift.pid" && echo "  drift monitor running (log: deploy/run/drift.log)" \
+        || { echo "  drift monitor exited, see deploy/run/drift.log" >&2; return 1; }
+}
+
 case "${1:-all}" in
     nginx) start_nginx ;;
     consumer) start_consumer ;;
+    drift) start_drift ;;
     all)   start_instances $(seq "${#PORTS[@]}")
            start_nginx ;;
     *)     if [[ "$1" =~ ^[0-9]+$ ]] && (( $1 >= 1 && $1 <= ${#PORTS[@]} )); then
                start_instances "$1"
            else
-               echo "usage: $0 [all|nginx|consumer|1..${#PORTS[@]}]" >&2; exit 2
+               echo "usage: $0 [all|nginx|consumer|drift|1..${#PORTS[@]}]" >&2; exit 2
            fi ;;
 esac

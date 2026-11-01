@@ -13,6 +13,7 @@ Run:  MODEL_DIR=models/e7_v2 uvicorn api.main:app --reload
 """
 import json
 import logging
+import math
 import os
 import signal
 from contextlib import asynccontextmanager
@@ -21,12 +22,14 @@ from typing import Annotated, Literal, Optional, Protocol
 
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from src.decision_engine import DEFAULT_POLICY_PATH, DecisionEngine, DecisionPolicy
-from src.events import KafkaEventPublisher, ProducerLedger, build_prediction_event
+from src.events import (TRAFFIC_SOURCES, KafkaEventPublisher, ProducerLedger, RateLimitedLog,
+                        build_prediction_event)
 from src.monitoring_features import feature_summary
 from src.predict import TIMING_LOG, FraudPredictor
 from src.shutdown import stop_file_from_env, watch_stop_file
@@ -36,6 +39,27 @@ log = logging.getLogger("nilepay.api")
 
 # Set per instance by deploy/start.sh (1..6); low-cardinality label for events.
 INSTANCE_ID = int(os.environ["INSTANCE_ID"]) if os.getenv("INSTANCE_ID", "").isdigit() else None
+
+# Traffic source tag for monitoring (DATA_DRIFT.md): optional request header, internal callers only.
+# Missing or invalid -> "production", so untagged traffic is always monitored and a typo cannot
+# hide traffic from drift detection. It never changes the prediction or the response.
+TRAFFIC_HEADER = "x-traffic-source"
+traffic_source_invalid = 0
+_traffic_warn = RateLimitedLog()
+
+
+def traffic_source(request):
+    global traffic_source_invalid
+    value = request.headers.get(TRAFFIC_HEADER)
+    if value is None:
+        return "production"
+    value = value.strip().lower()
+    if value in TRAFFIC_SOURCES:
+        return value
+    traffic_source_invalid += 1
+    _traffic_warn.warning("traffic_source", "invalid X-Traffic-Source header (%d so far): counted as production",
+                          traffic_source_invalid)
+    return "production"
 
 class AccountService(Protocol):
     def get_balance(self, account_id: str) -> Optional[float]:
@@ -61,14 +85,16 @@ class InMemoryAccountService:
 class TransactionRequest(BaseModel):
     transaction_id: Optional[str] = None
     type: Literal["CASH_IN", "CASH_OUT", "DEBIT", "PAYMENT", "TRANSFER"]
-    amount: float = Field(ge=0)
+    amount: float = Field(ge=0, allow_inf_nan=False)
     sender_id: str = Field(min_length=1, description="nameOrig")
     receiver_id: str = Field(min_length=1, description="nameDest")
     step: Optional[int] = Field(default=None, ge=0, description="Hours since start; only used by E5")
     sender_balance: Optional[float] = Field(
-        default=None, ge=0, description="oldbalanceOrg fallback, used only if the account service has no balance")
+        default=None, ge=0, allow_inf_nan=False,
+        description="oldbalanceOrg fallback, used only if the account service has no balance")
     receiver_balance: Optional[float] = Field(
-        default=None, ge=0, description="oldbalanceDest fallback, used only if the account service has no balance")
+        default=None, ge=0, allow_inf_nan=False,
+        description="oldbalanceDest fallback, used only if the account service has no balance")
 
 
 class ScoreResponse(BaseModel):
@@ -193,7 +219,33 @@ async def count_rejected_input(request: Request, exc: RequestValidationError):
         for field in fields:
             key = field if field in INPUT_REJECTION_FIELDS else "other"
             input_rejections["by_field"][key] = input_rejections["by_field"].get(key, 0) + 1
+    errors = exc.errors()
+    if any(_has_non_finite(err.get("input")) for err in errors):
+        # The default handler echoes the rejected input; NaN/Infinity cannot be rendered as JSON,
+        # which would turn a 422 into a 500. Echo them as strings instead.
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(
+            [{**err, "input": _finite_or_str(err.get("input"))} for err in errors])})
     return await request_validation_exception_handler(request, exc)
+
+
+def _has_non_finite(value):
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, dict):
+        return any(_has_non_finite(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_non_finite(v) for v in value)
+    return False
+
+
+def _finite_or_str(value):
+    if isinstance(value, float) and not math.isfinite(value):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _finite_or_str(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite_or_str(v) for v in value]
+    return value
 
 
 @app.get("/metrics/decisions", include_in_schema=False)
@@ -208,7 +260,7 @@ def decision_metrics(request: Request):
 @app.get("/metrics/events", include_in_schema=False)
 def event_metrics(request: Request):
     """Internal: Kafka event publishing counters for this instance."""
-    return request.app.state.event_publisher.snapshot()
+    return {**request.app.state.event_publisher.snapshot(), "traffic_source_invalid": traffic_source_invalid}
 
 
 @app.get("/health")
@@ -289,11 +341,12 @@ async def predict(
         },
     )
     publish_event(request.app.state.event_publisher, response, tx.type, decision.would_decline, model_ms,
-                  predictor=predictor, record=record)
+                  predictor=predictor, record=record, source=traffic_source(request))
     return response
 
 
-def publish_event(publisher, response, transaction_type, would_decline, scoring_ms, predictor=None, record=None):
+def publish_event(publisher, response, transaction_type, would_decline, scoring_ms, predictor=None, record=None,
+                  source="production"):
     """Hand the event to the publisher (non-blocking enqueue). Event publishing must
     never change or fail the prediction response.
 
@@ -310,6 +363,6 @@ def publish_event(publisher, response, transaction_type, would_decline, scoring_
                 log.exception("could not build the monitoring feature summary")
         publisher.publish(build_prediction_event(
             response.model_dump(), transaction_type=transaction_type, would_decline=would_decline,
-            instance_id=INSTANCE_ID, scoring_ms=scoring_ms, feature_summary=summary))
+            instance_id=INSTANCE_ID, scoring_ms=scoring_ms, feature_summary=summary, traffic_source=source))
     except Exception:
         log.exception("could not build or publish prediction event")

@@ -225,6 +225,8 @@ Optional: with `KAFKA_BOOTSTRAP_SERVERS` set, each instance also publishes every
 
 The consumer also aggregates prediction behaviour and input data quality (rolling 5 min / 1 h / 24 h windows, per model and policy version) and compares them with a versioned baseline built from the model's training data; the live dashboard shows it. Model performance (precision, recall, PR-AUC, cost) is computed only from actual labels, and none exist yet. **[ML_MONITORING.md](ML_MONITORING.md)**.
 
+A separate drift monitor compares production inputs with the training baseline per feature. It uses PSI, a chi-square test with Holm adjustment, and missing-rate and unknown-category checks, and raises deduplicated alerts. Drift is a distribution change, not a measured loss of accuracy. **[DATA_DRIFT.md](DATA_DRIFT.md)**.
+
 ### Limitations
 
 - **Six instances on one machine do not protect against machine-level failure.** Power, kernel, disk, network or memory failure on this host takes down all six instances and Nginx together. There's no real high availability, and nothing here supports a 99.9% availability claim.

@@ -1,0 +1,25 @@
+{
+  "_comment": "Data drift thresholds (DATA_DRIFT.md). Edit and the drift monitor picks it up on its next run; no code change. PSI bands are initial heuristics, not statistical truths.",
+  "windows": {"1h": 60, "24h": 1440},
+  "min_samples": 500,
+  "psi": {"moderate": 0.10, "substantial": 0.20},
+  "psi_overrides": {},
+  "psi_smoothing_alpha": 0.5,
+  "max_groups": 10,
+  "alpha": 0.01,
+  "min_expected": 5,
+  "missing_rate_abs": 0.05,
+  "unknown_rate": 0.01,
+  "non_finite_rate": 0.001,
+  "overflow_error_rate": 0.01,
+  "critical_features": ["amount", "oldbalanceOrg", "transaction_type"],
+  "prediction_drift": true,
+  "alerts": {
+    "min_severity": "substantial",
+    "sustained_minutes": 60,
+    "stale_after_s": 120,
+    "low_volume_min_per_hour": 100,
+    "traffic_sources": ["production"],
+    "expire_without_data": true
+  }
+}

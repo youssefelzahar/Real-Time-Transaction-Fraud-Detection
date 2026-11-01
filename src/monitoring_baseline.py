@@ -10,6 +10,10 @@ from the TRAIN split only. The validation split is scored once to record a refer
 decision distribution under the current policy; it is never used to evaluate the model here.
 Never fitted on production data. Writes monitoring/baselines/<model_version>/bl-<model_version>-<n>.json
 and never overwrites an existing version.
+
+Schema 2 (data drift, see DATA_DRIFT.md) adds raw counts next to the shares of schema 1:
+bin_counts, flag_counts, categorical.transaction_type, the feature-pipeline identity and the
+list of monitored features. Every schema-1 key is kept, so readers of schema 1 keep working.
 """
 import argparse
 import hashlib
@@ -29,6 +33,7 @@ from src.predict import FraudPredictor
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUT = ROOT / "monitoring" / "baselines"
 QUANTILES = (0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 0.999)
+BASELINE_SCHEMA = 2
 
 
 def sha256(path, chunk=1 << 20):
@@ -44,7 +49,7 @@ def _f(x):
 
 
 def feature_stats(X):
-    out, bins, ranges, p999 = {}, {}, {}, {}
+    out, bins, counts_out, ranges, p999 = {}, {}, {}, {}, {}
     for name in X.columns:
         v = X[name].to_numpy(dtype="float64")
         finite = v[np.isfinite(v)]
@@ -60,10 +65,11 @@ def feature_stats(X):
             b = b[~np.isnan(b)].astype(int)
             values, counts = np.unique(b, return_counts=True)
             bins[name] = {str(k): float(c / len(b)) for k, c in zip(values, counts)}
+            counts_out[name] = {str(k): int(c) for k, c in zip(values, counts)}
             if len(b):
                 ranges[name] = [int(b.min()), int(b.max())]
                 p999[name] = int(np.quantile(b, 0.999, method="higher"))
-    return out, bins, ranges, p999
+    return out, bins, counts_out, ranges, p999
 
 
 def build_baseline(df, model_dir, *, baseline_version, policy, dataset):
@@ -80,9 +86,21 @@ def build_baseline(df, model_dir, *, baseline_version, policy, dataset):
     assert not set(names) & set(LEAKY_COLUMNS)
 
     X_train = predictor.pipeline.transform(train)
-    stats, bins, ranges, p999 = feature_stats(X_train)
+    stats, bins, bin_counts, ranges, p999 = feature_stats(X_train)
     flags = {n: float(np.nanmean(X_train[n].to_numpy())) for n in names if n in FLAG_FEATURES}
-    types = train["type"].astype(str).value_counts(normalize=True)
+    flag_counts = {}
+    for n in names:
+        if n in FLAG_FEATURES:
+            v = X_train[n].to_numpy(dtype="float64")
+            flag_counts[n] = {"0": int((v == 0).sum()), "1": int((v == 1).sum()), "null": int((~np.isfinite(v)).sum())}
+    raw_types = train["type"]
+    type_counts = raw_types.astype(str).value_counts()
+    types = type_counts / type_counts.sum()
+    n_types = int(len(raw_types))
+    known = {t: int(type_counts.get(t, 0)) for t in KNOWN_TYPES}
+    missing_types = int(raw_types.isna().sum())
+    unknown_types = n_types - missing_types - sum(known.values())
+    pipeline_sha = sha256(model_dir / "pipeline.json")
 
     # Reference only (not an evaluation): validation scores and the current policy's decisions.
     scores = predictor.model.predict_proba(predictor.pipeline.transform(val))[:, 1]
@@ -98,7 +116,20 @@ def build_baseline(df, model_dir, *, baseline_version, policy, dataset):
 
     n_val = len(scores)
     return {
+        "baseline_schema": BASELINE_SCHEMA,
         "baseline_version": baseline_version,
+        "feature_pipeline": {"feature_set": metadata["feature_set"], "sha256": pipeline_sha,
+                             "id": f"{metadata['feature_set']}-{pipeline_sha[:8]}"},
+        "monitored_features": {**{n: "numeric" for n in names if n in BINNED_FEATURES},
+                               **{n: "binary" for n in names if n in FLAG_FEATURES},
+                               "transaction_type": "categorical"},
+        "bin_counts": bin_counts,
+        "flag_counts": flag_counts,
+        "categorical": {"transaction_type": {
+            "source_feature": "type_code" if "type_code" in names else None,
+            "n": n_types, "counts": known, "proportions": {t: c / n_types for t, c in known.items()},
+            "missing_rate": missing_types / n_types if n_types else None,
+            "unknown_rate": unknown_types / n_types if n_types else None}},
         "model_version": predictor.model_version,
         "dataset": dataset,
         "artifacts": {f: sha256(model_dir / f) for f in ("model.json", "pipeline.json", "metadata.json")},

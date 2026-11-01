@@ -190,7 +190,8 @@ def test_kafka_disabled_unchanged_with_ledger(api_state, tmp_path, monkeypatch):
     monkeypatch.setenv("EVENT_LEDGER_DIR", str(tmp_path))
     app.state.event_publisher = NullPublisher()
     with TestClient(app) as c:
-        assert c.get("/metrics/events").json() == {"kafka_enabled": False}
+        m = c.get("/metrics/events").json()
+        assert m["kafka_enabled"] is False and set(m) == {"kafka_enabled", "traffic_source_invalid"}
         assert c.post("/predict", json=BODY).status_code == 200
     start, stop = read_ledger(tmp_path)
     assert start["kafka_enabled"] is False and stop["kafka_enabled"] is False and "enqueued" not in stop

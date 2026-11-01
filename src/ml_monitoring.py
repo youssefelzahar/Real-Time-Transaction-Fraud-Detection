@@ -202,7 +202,12 @@ class MonitoringAggregator:
 
     # --- ingestion --------------------------------------------------------------------------
     def _series(self, e):
+        # Production keeps the original "model|policy" key (older state stays valid); tagged
+        # non-production traffic (load tests, demos, tests) is counted in its own series.
         key = f"{e.get('model_version')}|{e.get('decision_policy_version')}"
+        source = e.get("traffic_source") or "production"
+        if source != "production":
+            key = f"{key}|{source}"
         if key not in self.cumulative and len(self.cumulative) >= MAX_SERIES:
             key = f"{OTHER}|{OTHER}"
         return key
@@ -375,6 +380,12 @@ def series_report(stats, baseline=None, min_events=MIN_EVENTS):
     return report
 
 
+def series_parts(key):
+    """"model|policy" (production) or "model|policy|source" -> (model, policy, source)."""
+    parts = key.split("|")
+    return parts[0], parts[1] if len(parts) > 1 else OTHER, parts[2] if len(parts) > 2 else "production"
+
+
 def load_state(path):
     """Read-only view of the consumer's saved state (the dashboard never writes it)."""
     agg = MonitoringAggregator(None)
@@ -393,24 +404,13 @@ def load_state(path):
     return agg
 
 
-def latest_baseline(directory, model_version):
-    """Highest-numbered baseline for this model version: <dir>/<model_version>/bl-<model_version>-<n>.json."""
-    folder = Path(directory) / model_version
-    candidates = []
-    for p in folder.glob(f"bl-{model_version}-*.json"):
-        suffix = p.stem.rsplit("-", 1)[-1]
-        if suffix.isdigit():
-            candidates.append((int(suffix), p))
-    if not candidates:
-        return None
-    try:
-        return json.loads(max(candidates)[1].read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+def series_order(key, n):
+    """Production series first (the business population), then by size: what dashboards show first."""
+    return (series_parts(key)[2] != "production", -n)
 
 
 def monitoring_report(agg, window_minutes, baseline_dir, now=None, min_events=MIN_EVENTS, stale_after_s=30,
-                      lag=None):
+                      lag=None, models_dir=None):
     """Everything the dashboard's ML section shows for one window.
 
     The consumer saves the state only when it commits new events, so an old state is normal when
@@ -420,15 +420,20 @@ def monitoring_report(agg, window_minutes, baseline_dir, now=None, min_events=MI
     if agg is None:
         return {"available": False, "reason": "no monitoring state yet (consumer not started with monitoring, "
                                               "or no event processed since)"}
+    from src.drift_detection import select_baseline   # same validated choice as the drift monitor
     merged, volume = agg.window(window_minutes)
-    series = {}
-    for key, stats in sorted(merged.items(), key=lambda kv: -kv[1]["n"]):
-        model_version, policy_version = key.split("|", 1)
-        baseline = latest_baseline(baseline_dir, model_version) if model_version != OTHER else None
+    series, chosen = {}, {}
+    for key, stats in sorted(merged.items(), key=lambda kv: series_order(kv[0], kv[1]["n"])):
+        model_version, policy_version, source = series_parts(key)
+        if model_version not in chosen:
+            chosen[model_version] = select_baseline(baseline_dir, model_version, models_dir) \
+                if model_version != OTHER else (None, ["aggregated overflow series"], [])
+        baseline, problems, skipped = chosen[model_version]
         rep = series_report(stats, baseline, min_events)
-        rep["model_version"], rep["policy_version"] = model_version, policy_version
+        rep["model_version"], rep["policy_version"], rep["traffic_source"] = model_version, policy_version, source
         rep["baseline_version"] = baseline["baseline_version"] if baseline else None
-        rep["baseline_status"] = "ok" if baseline else "no baseline for this model version"
+        rep["baseline_status"] = "ok" if baseline else "; ".join(problems)
+        rep["baselines_skipped"] = skipped
         rep["volume_per_bucket"] = [[_iso_minute(m), c] for m, c in volume.get(key, [])]
         series[key] = rep
 

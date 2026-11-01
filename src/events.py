@@ -39,13 +39,16 @@ DEFAULT_TOPIC = "nilepay.prediction-events"
 # Only these response fields leave the API. Account IDs, amounts and balances never do.
 RESPONSE_FIELDS = ("transaction_id", "fraud_probability", "decision", "reason_code", "threshold",
                    "decision_policy_version", "model_version", "missing_features", "balance_source")
+# Where the request came from, for monitoring only (X-Traffic-Source header, see DATA_DRIFT.md).
+TRAFFIC_SOURCES = ("production", "loadtest", "test", "demo")
 
 
 def build_prediction_event(response, *, transaction_type, would_decline, instance_id=None, scoring_ms=None,
-                           feature_summary=None):
+                           feature_summary=None, traffic_source=None):
     """Event for one /predict response. `response` is the ScoreResponse as a dict.
     `feature_summary` (src/monitoring_features.py): coarse bins and flags for monitoring, never
-    the exact amounts or balances. Optional; consumers treat its absence as "not available"."""
+    the exact amounts or balances. Optional; consumers treat its absence as "not available".
+    `traffic_source` (one of TRAFFIC_SOURCES): optional; consumers treat its absence as production."""
     event = {
         "event_id": str(uuid.uuid4()),
         "event_type": EVENT_TYPE,
@@ -59,6 +62,8 @@ def build_prediction_event(response, *, transaction_type, would_decline, instanc
     event.update({k: response[k] for k in RESPONSE_FIELDS})
     if feature_summary is not None:
         event.update(feature_summary)
+    if traffic_source is not None:
+        event["traffic_source"] = traffic_source
     return event
 
 
