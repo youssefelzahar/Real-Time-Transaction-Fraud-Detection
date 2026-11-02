@@ -191,6 +191,16 @@ deploy/stop.sh; deploy/stop.sh consumer; deploy/kafka.sh stop
 
 Without `KAFKA_BOOTSTRAP_SERVERS` the API runs exactly as before. Details: [KAFKA_EVENTS.md](KAFKA_EVENTS.md).
 
+### Streamlit UI (submit a transaction, see the decision and health)
+
+```bash
+pip install -r streamlit_app/requirements.txt   # once; separate from the API's requirements
+python -m monitoring.live_dashboard &           # optional: Kafka/consumer status and the event feed
+streamlit run streamlit_app/app.py              # open http://localhost:8501
+```
+
+Details and settings: [streamlit_app/README.md](streamlit_app/README.md).
+
 ### Live view (see requests and events moving)
 
 ```bash

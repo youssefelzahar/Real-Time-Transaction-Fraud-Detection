@@ -229,6 +229,10 @@ A separate drift monitor compares production inputs with the training baseline p
 
 When retraining may be considered, which data may be used, and how a candidate would be judged against the champion is set by a report-only policy (`config/retraining_policy.json`, `python -m src.retraining triggers`). Nothing retrains or promotes automatically, and existing model directories can't be overwritten. **[RETRAINING_STRATEGY.md](RETRAINING_STRATEGY.md)**.
 
+### Streamlit UI
+
+A small UI (`streamlit run streamlit_app/app.py`) submits transactions through Nginx and shows the decision, the system's health and recent transactions. It holds no model and reads only existing endpoints. **[streamlit_app/README.md](streamlit_app/README.md)**.
+
 ### Limitations
 
 - **Six instances on one machine do not protect against machine-level failure.** Power, kernel, disk, network or memory failure on this host takes down all six instances and Nginx together. There's no real high availability, and nothing here supports a 99.9% availability claim.

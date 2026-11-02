@@ -1,0 +1,4 @@
+# UI only; the API's requirements.txt is unchanged. Versions verified on 2026-11-02.
+streamlit==1.66.1
+requests==2.34.2
+pandas
